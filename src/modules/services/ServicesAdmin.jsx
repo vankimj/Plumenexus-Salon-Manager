@@ -72,6 +72,22 @@ export default function ServicesAdmin() {
     }
   }
 
+  // Main vs sub-option: a "sub-option" category is hidden from the main booking
+  // menu — its services are only offered as add-ons on the main services they're
+  // linked to (via each service's "Add-ons offered" list). Merge-safe write.
+  async function toggleCategorySubOption(category) {
+    const cur  = !!categoryDisplay[category]?.subOption;
+    const next = { ...categoryDisplay, [category]: { ...(categoryDisplay[category] || {}), subOption: !cur } };
+    setCategoryDisplay(next);
+    try {
+      await updateBookingConfig({ categoryDisplay: next });
+      showToast(!cur ? `${category}: now a sub-option — hidden from the menu, offered as add-ons` : `${category}: now a main selection on the booking menu`);
+    } catch {
+      setCategoryDisplay(categoryDisplay); // revert on failure
+      showToast('Could not save — try again');
+    }
+  }
+
   // The legacy nail starter menu must seed ONLY for nail / legacy tenants. A
   // vertical that brings its own service template (e.g. personal training) must
   // never get it. The onboarding wizard writes settings.vertical server-side
@@ -332,7 +348,15 @@ export default function ServicesAdmin() {
           <div style={{ padding: '12px 18px 10px', borderBottom: '1px solid var(--pn-border)', background: 'var(--pn-bg)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span style={{ fontFamily: "'Cinzel', serif", fontSize: 12, fontWeight: 600, color: '#2D7A5F', letterSpacing: '.16em', textTransform: 'uppercase' }}>{category}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              {!isTech && svcs.some(s => s.categoryExclusive) && (
+              {!isTech && (
+                <label onClick={e => e.stopPropagation()}
+                  title="Sub-option category: hidden from the main booking menu. Its services are offered only as add-ons on the main services you link them to (each service's 'Add-ons offered')."
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'var(--pn-text-muted)', letterSpacing: '.04em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <span>Sub-option</span>
+                  <Toggle active={!!categoryDisplay[category]?.subOption} onChange={() => toggleCategorySubOption(category)} />
+                </label>
+              )}
+              {!isTech && !categoryDisplay[category]?.subOption && svcs.some(s => s.categoryExclusive) && (
                 <label onClick={e => e.stopPropagation()}
                   title="Pick-one category: when a client picks one option while booking, hide the other options here instead of graying them out."
                   style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'var(--pn-text-muted)', letterSpacing: '.04em', cursor: 'pointer', whiteSpace: 'nowrap' }}>

@@ -2035,6 +2035,10 @@ function ServiceCatalog({ services, cart, onAdd, onRemove, onAddAddOn, onRemoveA
     <div>
       {groups.map(({ category, services: svcs }) => {
         const color = CATEGORY_COLORS[category] || '#1a1a1a';
+        // Sub-option category: not shown on the main booking menu — its services
+        // are offered only as add-ons on the main services they're linked to
+        // (svc.addOnServiceIds). They still resolve via servicesById for those popups.
+        if (cdConfig[category]?.subOption) return null;
         // Per-category "hide others when picked": once an exclusive service in
         // this category is in the cart, drop the now-blocked siblings instead of
         // greying them. Default (no config) = show all → grey-out as before.
