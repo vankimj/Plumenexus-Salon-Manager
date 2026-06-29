@@ -2028,7 +2028,7 @@ function ServiceCatalog({ services, cart, onAdd, onRemove, onAddAddOn, onRemoveA
   const addOnsEnabled = !!onAddAddOn;
   const base = detailSvc ? (cart || []).find(i => i.service.id === detailSvc.id && !i.parentSvcId) : null;
   const detailAddOnSvcs = (detailSvc && addOnsEnabled)
-    ? (detailSvc.addOnServiceIds || []).map(id => servicesById[id]).filter(a => a && a.active !== false)
+    ? (detailSvc.addOnServiceIds || []).map(id => servicesById[id]).filter(a => a && a.active !== false && cdConfig[a.category]?.active !== false)
     : [];
   const detailCurrentAddOnIds = detailSvc ? (cart || []).filter(it => it.parentSvcId === detailSvc.id).map(it => it.service.id) : [];
   return (
@@ -2038,6 +2038,7 @@ function ServiceCatalog({ services, cart, onAdd, onRemove, onAddAddOn, onRemoveA
         // Sub-option category: not shown on the main booking menu — its services
         // are offered only as add-ons on the main services they're linked to
         // (svc.addOnServiceIds). They still resolve via servicesById for those popups.
+        if (cdConfig[category]?.active === false) return null; // whole category turned off
         if (cdConfig[category]?.subOption) return null;
         // Per-category "hide others when picked": once an exclusive service in
         // this category is in the cart, drop the now-blocked siblings instead of

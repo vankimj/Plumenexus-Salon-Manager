@@ -2807,6 +2807,17 @@ export async function updateBookingConfig(patch) {
   await setDoc(BOOKING_CONFIG_REF, { ...patch, updatedAt: new Date().toISOString() }, { merge: true });
 }
 
+// Replace the whole categoryDisplay map (not deep-merge) so REMOVING a category
+// key actually drops it — merge would retain the old key. updateDoc replaces the
+// field; falls back to a create if the config doc doesn't exist yet.
+export async function replaceCategoryDisplay(map) {
+  try {
+    await updateDoc(BOOKING_CONFIG_REF, { categoryDisplay: map, updatedAt: new Date().toISOString() });
+  } catch {
+    await setDoc(BOOKING_CONFIG_REF, { categoryDisplay: map, updatedAt: new Date().toISOString() }, { merge: true });
+  }
+}
+
 // ── Client chat ────────────────────────────────────────
 // One document per client (keyed by clientId). Messages stored as an array.
 const CHATS_COL = tenantCol('chats');
