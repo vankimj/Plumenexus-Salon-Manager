@@ -64,3 +64,31 @@ export function getSlots(dur) {
   for (let m = BOOKING_START; m + dur <= BOOKING_END; m += SLOT_STEP) slots.push(m);
   return slots;
 }
+
+// Bookable window (minutes since midnight) for a weekday short-name ('Mon'…'Sun').
+// Combines the storefront hours with the (typically wider) appointment-hours
+// window — the same coalescing the day grid uses — so an appointment may
+// legitimately run until whichever closes later. On a day the store is marked
+// closed, only the appointment-hours window applies. Falls back to 9am–8pm.
+export function bookableWindow(settings, dow) {
+  const day = (settings && settings.storeHours && settings.storeHours[dow]) || {};
+  const wk  = (settings && settings.walkIn) || {};
+  const ah  = (settings && settings.apptHours) || {};
+  const storeOpen  = strToMins(day.open  || wk.open  || '09:00');
+  const storeClose = strToMins(day.close || wk.close || '18:00');
+  const apptOpen   = strToMins(ah.open  || '09:00');
+  const apptClose  = strToMins(ah.close || '20:00');
+  const closed = !!day.closed;
+  return {
+    closed,
+    open:  closed ? apptOpen  : Math.min(storeOpen,  apptOpen),
+    close: closed ? apptClose : Math.max(storeClose, apptClose),
+  };
+}
+
+// Total scheduled minutes for an appointment: sum of service durations, with a
+// fallback to an explicit `duration` field, then 60.
+export function apptDurationMins(appt) {
+  return (((appt && appt.services) || []).reduce((s, sv) => s + (Number(sv.duration) || 0), 0))
+    || Number(appt && appt.duration) || 60;
+}

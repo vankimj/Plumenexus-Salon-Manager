@@ -30,6 +30,28 @@ export function isSalonOpenNow(settings, now = new Date()) {
   return cur >= open && cur < close;
 }
 
+// Bookable window (minutes since midnight) for a weekday short-name ('Mon'…'Sun').
+// Mobile twin of web src/lib/booking.js bookableWindow — keep the two in sync.
+// Combines store hours with the (typically wider) appointment-hours window so an
+// appointment may run until whichever closes later; on a day the store is marked
+// closed only the appointment-hours window applies. Falls back to 9am–8pm.
+export function bookableWindow(settings, dow) {
+  const day = (settings && settings.storeHours && settings.storeHours[dow]) || {};
+  const wk  = (settings && settings.walkIn) || {};
+  const ah  = (settings && settings.apptHours) || {};
+  const mins = (v, fb) => { const m = hhmmToMins(v); return m == null ? hhmmToMins(fb) : m; };
+  const storeOpen  = mins(day.open,  wk.open  || '09:00');
+  const storeClose = mins(day.close, wk.close || '18:00');
+  const apptOpen   = mins(ah.open,  '09:00');
+  const apptClose  = mins(ah.close, '20:00');
+  const closed = !!day.closed;
+  return {
+    closed,
+    open:  closed ? apptOpen  : Math.min(storeOpen,  apptOpen),
+    close: closed ? apptClose : Math.max(storeClose, apptClose),
+  };
+}
+
 export function isEntryClockedIn(entry) {
   if (!entry) return false;
   const events = entry.events;

@@ -3,6 +3,7 @@ import { parsePhoneNumberFromString as lpnParse, AsYouType as AsYouTypeFormatter
 import { currentLocationId, isMultiLocation, effectiveLocationId, appointmentInLocation, employeeInLocation, subscribeLocations, subscribeCurrentLocation } from '../../lib/locations';
 import { fetchAppointments, fetchAppointmentsByRange, fetchAppointmentById, subscribeToAppointments, subscribeToAppointmentsByRange, createAppointment, saveAppointment, deleteAppointment, deleteRecurringGroup, fetchRecurringGroup, fetchClients, createClient, fetchServices, fetchEmployees, fetchUserPrefs, saveUserPrefs, subscribeQueue, updateWaitlistEntry, removeWaitlistEntry, subscribeTurnRoster, saveTurnRoster, subscribeTimeOff, createTimeOff, updateTimeOff, deleteTimeOff, fetchClientVisits, patchWebfrontConfig, storeHoursToWebfrontHours, fetchAttendance, subscribeAttendance, fetchReceiptByApptId } from '../../lib/firestore';
 import { isSalonOpenNow, clockedInNameSet, clockedInTodayNameSet, techWorkStatus, isScheduledOnDay, attendanceKey } from '../../lib/shiftGate';
+import { bookableWindow, apptDurationMins } from '../../lib/booking';
 import { computeNextOpening, computeSeatStart } from './seatTime';
 import ClientSearch from './ClientSearch';
 import { callFn, startTrace } from '../../lib/firebase';
@@ -2682,11 +2683,15 @@ function ApptModal({ appt, mode, clients, services, techs, employees = [], onCha
       list.push({ kind: 'warn', icon: '✂️', label: 'No service is selected. The appointment will save without one.' });
     }
 
-    // WARN · out-of-hours / closed-day
+    // OUT-OF-HOURS · an appointment must fit inside its day's bookable window
+    // (store hours widened by the appointment-hours window — see bookableWindow).
+    // Running past the latest bookable time is a hard BLOCK ("longer than the
+    // salon's hours"); a too-early start or a normally-closed day stay as
+    // informational warnings.
     if (appt.date && appt.startTime) {
-      const dur       = (appt.services || []).reduce((s, sv) => s + (Number(sv.duration) || 0), 0) || Number(appt.duration) || 60;
       const apptDow   = dayOfWeek(appt.date);
-      const day       = settings?.storeHours?.[apptDow] || {};
+      const win        = bookableWindow(settings, apptDow);
+      const dur       = apptDurationMins(appt);
       const startMins = strToMins(appt.startTime);
       const endMins   = startMins + dur;
       const fmtMins   = (m) => {
@@ -2696,16 +2701,13 @@ function ApptModal({ appt, mode, clients, services, techs, employees = [], onCha
         return `${hh}:${String(mm).padStart(2, '0')} ${ampm}`;
       };
       const dowLabel = apptDow.charAt(0).toUpperCase() + apptDow.slice(1);
-      if (day.closed) {
+      if (win.closed) {
         list.push({ kind: 'warn', icon: '🚫', label: `The salon is marked closed on ${dowLabel}. Booking will save anyway.` });
-      } else if (day.open && day.close) {
-        const openMins  = strToMins(day.open);
-        const closeMins = strToMins(day.close);
-        if (startMins < openMins) {
-          list.push({ kind: 'warn', icon: '🕐', label: `Starts at ${fmtMins(startMins)} — before the salon opens at ${fmtMins(openMins)}.` });
-        } else if (endMins > closeMins) {
-          list.push({ kind: 'warn', icon: '🕐', label: `Ends at ${fmtMins(endMins)} (${dur}-minute duration) — after the salon closes at ${fmtMins(closeMins)}.` });
-        }
+      }
+      if (endMins > win.close) {
+        list.push({ kind: 'block', icon: '🕐', label: `Ends at ${fmtMins(endMins)} (${dur}-minute appointment) — past the latest bookable time, ${fmtMins(win.close)}. Shorten it or start earlier.` });
+      } else if (startMins < win.open) {
+        list.push({ kind: 'warn', icon: '🕐', label: `Starts at ${fmtMins(startMins)} — before bookable hours begin at ${fmtMins(win.open)}.` });
       }
     }
 
