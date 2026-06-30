@@ -4,6 +4,8 @@ import { auth, callFn, ALLOWED_EMAILS } from '../lib/firebase';
 import { getCurrentTenant, subscribeTenant } from '../lib/currentTenant';
 import { dedupe } from '../lib/inflight';
 import useMyTenants from './useMyTenants';
+import { usePreviewRole } from '../context/PreviewRoleContext';
+import { applyPreviewAccess } from '../lib/previewAccess';
 
 // Resolves the signed-in user's access in the CURRENT tenant — the
 // mobile equivalent of the web AppContext role flags
@@ -73,5 +75,12 @@ export default function useTenantAccess() {
   const canEditSchedule =
     isAdmin || ((role === 'tech' || role === 'scheduler') && scheduleAccess !== 'view');
 
-  return { isAdmin, role, techName, scheduleAccess, plan, canEditSchedule, email, loading, isKioskSession: !!kiosk, kiosk };
+  const real = { isAdmin, role, techName, scheduleAccess, plan, canEditSchedule, email, loading, isKioskSession: !!kiosk, kiosk };
+
+  // "Preview as role" overlay (admin-only, UI-only). With no preview active this
+  // returns `real` augmented with caps/can()/realIsAdmin/isPreviewing — every
+  // existing consumer keeps its fields unchanged. usePreviewRole falls back to a
+  // null-preview default when rendered outside the provider (e.g. kiosk root).
+  const { previewRole, overlay } = usePreviewRole();
+  return applyPreviewAccess(real, previewRole, overlay);
 }

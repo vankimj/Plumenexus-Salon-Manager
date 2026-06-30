@@ -25,6 +25,7 @@ import HRScreen            from '../screens/manage/HRScreen';
 import MarketingScreen     from '../screens/manage/MarketingScreen';
 import TrashScreen         from '../screens/manage/TrashScreen';
 import AdminHomeScreen     from '../screens/admin/AdminHomeScreen';
+import PreviewRoleScreen   from '../screens/admin/PreviewRoleScreen';
 import AdminLogsScreen     from '../screens/admin/AdminLogsScreen';
 import AdminSettingsScreen from '../screens/admin/AdminSettingsScreen';
 import AdminTipFlowScreen  from '../screens/admin/AdminTipFlowScreen';
@@ -104,6 +105,8 @@ export default function ManageStack() {
 
       <Stack.Screen name="AdminHome" component={AdminHomeScreen}
         options={{ title: 'Admin', headerTitle: () => <HeaderTitle title="Admin" /> }} />
+      <Stack.Screen name="PreviewRole" component={PreviewRoleScreen}
+        options={{ headerTitle: () => <HeaderTitle title="Preview as role" /> }} />
       <Stack.Screen name="AdminLogs" component={AdminLogsScreen}
         options={{ headerTitle: () => <HeaderTitle title="Activity Log" /> }} />
       <Stack.Screen name="AdminSettings" component={AdminSettingsScreen}
