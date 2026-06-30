@@ -33,7 +33,7 @@ function blankEmployee() {
 }
 
 export default function EmployeesAdmin() {
-  const { isAdmin, showToast, settings, updateSettings } = useApp();
+  const { isAdmin, showToast, settings, updateSettings, addTechUsersForEmployees } = useApp();
   const [employees, setEmployees] = useState([]);
   const [services,  setServices]  = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -67,6 +67,19 @@ export default function EmployeesAdmin() {
       } else {
         await createEmployee({ ...emp, sortOrder: employees.length });
         logActivity('employee_created', emp.name);
+        // A new hire with an email is auto-granted a 'tech' login (Users &
+        // Roles) so they can sign in and see their schedule/earnings right
+        // away — no separate "add user" step. Admin-only path (this screen is
+        // admin-gated and saveUsers is admin-only). Deduped by email/techName,
+        // so re-adding an existing tech is a no-op. Best-effort: a failed grant
+        // never blocks the employee from being created.
+        const inviteEmail = (emp.email || '').trim();
+        if (inviteEmail) {
+          try {
+            const r = await addTechUsersForEmployees([emp]);
+            if (r?.added) showToast(`${emp.name} added as a tech — they can sign in with ${inviteEmail}`);
+          } catch (e) { console.warn('[Employees] auto tech-user grant failed:', e?.message || e); }
+        }
       }
       await load();
       setEditing(null);

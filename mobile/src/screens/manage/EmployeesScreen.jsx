@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'reac
 import ManageCrud from './ManageCrud';
 import useTenantAccess from '../../hooks/useTenantAccess';
 import useTrashHeader from '../../hooks/useTrashHeader';
-import { fetchEmployees, createEmployee, saveEmployee, deleteEmployee, fetchServices, setEmployeePin, clearEmployeePin } from '../../lib/firestore';
+import { fetchEmployees, createEmployee, saveEmployee, deleteEmployee, fetchServices, setEmployeePin, clearEmployeePin, addTechUserForEmployee } from '../../lib/firestore';
 import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 
 // Set / change / clear a tech's 4-digit clock-in PIN (scrypt-hashed server-side
@@ -94,7 +94,15 @@ export default function EmployeesScreen({ navigation }) {
   return (
     <ManageCrud
       load={fetchEmployees}
-      create={createEmployee}
+      create={async (item) => {
+        const id = await createEmployee(item);
+        // Auto-grant a 'tech' login when the new hire has an email (parity with
+        // web). Best-effort — a grant failure must not undo the created employee.
+        if ((item.email || '').trim()) {
+          try { await addTechUserForEmployee(item); } catch (e) { console.warn('[Employees] auto tech-user grant failed:', e?.message || e); }
+        }
+        return id;
+      }}
       save={saveEmployee}
       remove={deleteEmployee}
       canEdit={isAdmin}

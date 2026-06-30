@@ -1326,3 +1326,33 @@ export async function setUserRole(email, role, { techName, scheduleAccess } = {}
   if (!found) throw new Error('User not found in the access list');
   await saveUsers(updated);
 }
+
+// Auto-grant a 'tech' login for a newly-created employee that has an email —
+// mirrors web EmployeesAdmin's addTechUsersForEmployees (single employee).
+// Appends a tech record if this email/techName isn't already in the access
+// list, then writes the atomic projection. No-op (returns {added:0}) when the
+// email is blank or the person already has access. Admin-only (saveUsers writes
+// the admin-gated users docs); best-effort callers should swallow failures so a
+// grant error never blocks employee creation.
+export async function addTechUserForEmployee(emp) {
+  const email = (emp?.email || '').trim();
+  if (!email) return { added: 0 };
+  const lower = email.toLowerCase();
+  const tn = (emp?.name || '').trim().toLowerCase();
+  const users = await fetchUsersFull();
+  const exists = users.some(u =>
+    (u.email || '').toLowerCase() === lower ||
+    (tn && (u.techName || '').toLowerCase() === tn));
+  if (exists) return { added: 0 };
+  await saveUsers([...users, {
+    email,
+    name:      emp.name || email,
+    picture:   emp.photo || '',
+    role:      'tech',
+    techName:  emp.name || null,
+    phone:     emp.phone || '',
+    instagram: emp.instagram || '',
+    grantedAt: new Date().toISOString(),
+  }]);
+  return { added: 1 };
+}
