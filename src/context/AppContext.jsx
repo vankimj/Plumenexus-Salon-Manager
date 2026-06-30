@@ -449,7 +449,7 @@ export function AppProvider({ children }) {
       const realEmail = (e.email || '').trim();
       const email = realEmail || `${slugify(e.name)}@pending.meraki.local`;
       if (!realEmail) placeholders++;
-      return {
+      const u = {
         email,
         name:        e.name || email,
         picture:     e.photo || '',
@@ -457,9 +457,13 @@ export function AppProvider({ children }) {
         techName:    e.name || null,
         phone:       e.phone || '',
         instagram:   e.instagram || '',
-        emailPending: !realEmail || undefined,  // marker the admin can spot in the row
         grantedAt:   new Date().toISOString(),
       };
+      // Only flag placeholder (no-real-email) users. Must NOT write `undefined`
+      // — Firestore's writeBatch.set rejects undefined fields (this previously
+      // broke the whole grant for any employee WITH an email).
+      if (!realEmail) u.emailPending = true;
+      return u;
     });
     const updated = [...users, ...newUsers];
     setUsers(updated);
