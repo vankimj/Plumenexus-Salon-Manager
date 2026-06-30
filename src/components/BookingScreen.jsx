@@ -27,7 +27,7 @@ import { groupByCategory, formatPrice, formatDuration, resolveServicePricing } f
 import {
   strToMins,
   techCanDo, techsForService, techsForServices,
-  cartTotalDuration, isTechFreeAt, firstFreeTech, getSlots,
+  cartTotalDuration, isTechFreeAt, firstFreeTech, getSlots, bookableWindow,
 } from '../lib/booking';
 import { pickTech, startOfWeek, endOfWeek, DEFAULT_ASSIGNMENT_METHOD } from '../lib/techAssignment';
 import { getEffectiveFlow } from '../lib/bookingFlow';
@@ -1223,6 +1223,7 @@ export default function BookingScreen() {
             cartSlot={cartSlot} setCartSlot={setCartSlot}
             apptsByDate={apptsByDate} ensureApptsForDate={ensureApptsForDate}
             removalDur={15}
+            bookingHours={webCfg?.bookingHours}
             onProceed={() => {
               const haveAll = form.name.trim() && form.phone.trim();
               setStep(haveAll ? 5 : 4);
@@ -2239,7 +2240,7 @@ function TechCard({ tech, selected, onSelect }) {
 }
 
 // ── Step 3: Pick a date + start time for the whole cart ─
-function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, setCartDate, cartSlot, setCartSlot, apptsByDate, ensureApptsForDate, removalDur, onProceed, onBack, flowCfg }) {
+function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, setCartDate, cartSlot, setCartSlot, apptsByDate, ensureApptsForDate, removalDur, onProceed, onBack, flowCfg, bookingHours }) {
   const minLead = Math.max(0, Number(flowCfg?.minLeadTimeMinutes) || 0);
   const maxDays = Math.max(1, Number(flowCfg?.maxLeadDays) || 30);
   const multiLane = isMultiLane(cart);
@@ -2266,7 +2267,14 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
   const totalDur = multiLane
     ? (simultaneous ? Math.max(maniDurRep, pediDurRep) : (maniDurRep + pediDurRep))
     : cartTotalDuration(cart, removalDur, cartTech || undefined);
-  const allSlots = useMemo(() => getSlots(totalDur), [totalDur]);
+  // Constrain candidate start slots to the salon's real bookable window for the
+  // chosen weekday (store hours widened by appointment hours — the same window
+  // the staff scheduler enforces). bookingHours is mirrored from staff-only
+  // settings into the public webfront doc; absent it, bookableWindow falls back
+  // to 9am–8pm so nothing regresses for tenants that haven't set hours.
+  const dow = cartDate ? new Date(cartDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }) : null;
+  const bWindow = useMemo(() => bookableWindow(bookingHours || {}, dow), [bookingHours, dow]);
+  const allSlots = useMemo(() => getSlots(totalDur, bWindow), [totalDur, bWindow]);
 
   useEffect(() => { if (cartDate) ensureApptsForDate(cartDate); }, [cartDate]); // eslint-disable-line
 

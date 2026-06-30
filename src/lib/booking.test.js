@@ -219,6 +219,36 @@ describe('getSlots', () => {
   it('produces fewer slots for longer durations', () => {
     expect(getSlots(120).length).toBeLessThan(getSlots(30).length);
   });
+
+  it('honors an explicit window — starts at window.open, last slot fits window.close', () => {
+    const win = { open: strToMins('10:00'), close: strToMins('18:00') };
+    const slots = getSlots(60, win);
+    expect(slots[0]).toBe(win.open);
+    expect(slots[slots.length - 1] + 60).toBeLessThanOrEqual(win.close);
+    // No slot may start before the window opens or end after it closes.
+    expect(slots.every(s => s >= win.open && s + 60 <= win.close)).toBe(true);
+  });
+
+  it('a tighter window yields fewer slots than the 9am–8pm default', () => {
+    const tight = getSlots(60, { open: strToMins('10:00'), close: strToMins('16:00') });
+    expect(tight.length).toBeLessThan(getSlots(60).length);
+  });
+
+  it('falls back to the 9am–8pm default for a missing/partial window', () => {
+    expect(getSlots(60, undefined)).toEqual(getSlots(60));
+    expect(getSlots(60, {})).toEqual(getSlots(60));
+    // Partial window: only close provided → open falls back to BOOKING_START.
+    expect(getSlots(60, { close: strToMins('18:00') })[0]).toBe(BOOKING_START);
+  });
+
+  it('composes with bookableWindow to cap slots at the real close time', () => {
+    // Store + appt hours both close at 18:00 → no slot may run past 6pm.
+    const settings = { storeHours: { Wed: { open: '09:00', close: '18:00' } }, apptHours: { open: '09:00', close: '18:00' } };
+    const win = bookableWindow(settings, 'Wed');
+    const slots = getSlots(60, win);
+    expect(slots.every(s => s + 60 <= strToMins('18:00'))).toBe(true);
+    expect(getSlots(60).some(s => s + 60 > strToMins('18:00'))).toBe(true); // default would overrun
+  });
 });
 
 // ── apptDurationMins ───────────────────────────────────

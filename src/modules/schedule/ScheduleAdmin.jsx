@@ -4597,10 +4597,21 @@ function HoursModal({ settings, updateSettings, onClose }) {
       await updateSettings({ ...settings, storeHours: hours, apptHours: { open: apptOpen, close: apptClose },
         lateCheckinAlert: { enabled: lateEnabled, minutes: lm } });
       // Mirror to the publicly-readable webfront doc so the public website
-      // (which can't read staff-only `settings`) shows the same hours. Best-
-      // effort: a webfront write failure shouldn't block the schedule save.
+      // (which can't read staff-only `settings`) shows the same hours, AND the
+      // customer booking flow can constrain slots to the real bookable window
+      // (bookingHours = structured store/appt/walk-in hours for bookableWindow).
+      // Hours are non-sensitive (already shown publicly), so no settings-rules
+      // change is needed. Best-effort: a webfront write failure shouldn't block
+      // the schedule save.
       try {
-        await patchWebfrontConfig({ hours: storeHoursToWebfrontHours(hours) });
+        await patchWebfrontConfig({
+          hours: storeHoursToWebfrontHours(hours),
+          bookingHours: {
+            storeHours: hours,
+            apptHours: { open: apptOpen, close: apptClose },
+            walkIn: settings.walkIn || null,
+          },
+        });
       } catch (e) { console.warn('[hours mirror → webfront]', e?.message || e); }
       onClose();
     } finally { setSaving(false); }
