@@ -3725,8 +3725,11 @@ exports.emailEmployeeInvite = onCall({ cors: true }, async (request) => {
   const tenSnap = await db.doc(`tenants/${tenantId}`).get();
   const salonName = tenSnap.exists ? (tenSnap.data().name || 'Your salon') : 'Your salon';
   // Sign-in URL on the tenant's branded SaaS subdomain (cached lookup of
-  // tenants/{tenantId}.subdomain).
-  const signInUrl = await tenantBaseUrl(db, tenantId);
+  // tenants/{tenantId}.subdomain). MUST land on the staff app at /manage —
+  // the bare base URL is the PUBLIC client homepage (booking/marketing), which
+  // has no staff Google sign-in, so an invitee just landed on the storefront.
+  const base = (await tenantBaseUrl(db, tenantId)).replace(/\/+$/, '');
+  const signInUrl = `${base}/manage`;
 
   const apiKey = awsAccessKey.value();
   if (!apiKey) throw new HttpsError('unavailable', 'Email is not configured');

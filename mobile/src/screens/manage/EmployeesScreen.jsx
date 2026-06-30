@@ -80,6 +80,9 @@ export default function EmployeesScreen({ navigation }) {
       key: 'serviceIds', label: 'Services performed', type: 'multiselect',
       options: services.filter(s => s.active !== false).map(s => ({ value: s.id, label: s.name })),
       emptyLabel: 'Add services first (Manage → Services).',
+      // A tech performs every service by default — no "can do nothing" state.
+      // Empty (or full) shows all chips on; unchecking the last snaps back to all.
+      emptyMeansAll: true,
     },
     {
       key: 'pin', label: 'Clock-in PIN', type: 'custom',

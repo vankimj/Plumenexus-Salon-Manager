@@ -207,7 +207,9 @@ async function assignAllServicesToAll() {
 
 function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onToggleActive, onSendInvite }) {
   const svcCount = emp.serviceIds?.length || 0;
-  const svcConfigured = svcCount > 0;
+  // An empty OR a full list both mean "performs all" — only a partial list is a
+  // configured subset (matches ServicesPicker's no-"nothing"-state model).
+  const svcConfigured = svcCount > 0 && svcCount < totalServices;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: last ? 'none' : '1px solid var(--pn-border)', opacity: emp.active ? 1 : .5 }}>
       <button onClick={onView}
@@ -224,9 +226,9 @@ function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onTog
           </button>
           {!emp.active && <span style={{ fontSize: 10, color: 'var(--pn-text-faint)', marginLeft: 6, fontWeight: 400 }}>inactive</span>}
           {totalServices > 0 && (
-            <span title={svcConfigured ? `Performs ${svcCount} of ${totalServices} services` : 'No services configured — defaults to all services'}
-              style={{ fontSize: 10, marginLeft: 8, padding: '1px 7px', borderRadius: 10, fontWeight: 600, background: svcConfigured ? 'var(--pn-info-bg)' : 'var(--pn-warning-bg)', color: svcConfigured ? 'var(--pn-info)' : 'var(--pn-warning)', border: `1px solid ${svcConfigured ? '#bfdbfe' : '#fde68a'}` }}>
-              {svcConfigured ? `${svcCount} svc` : 'all svc (default)'}
+            <span title={svcConfigured ? `Performs ${svcCount} of ${totalServices} services` : 'Performs all services'}
+              style={{ fontSize: 10, marginLeft: 8, padding: '1px 7px', borderRadius: 10, fontWeight: 600, background: 'var(--pn-info-bg)', color: 'var(--pn-info)', border: '1px solid #bfdbfe' }}>
+              {svcConfigured ? `${svcCount} svc` : 'all svc'}
             </span>
           )}
         </div>
@@ -715,7 +717,14 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
 }
 
 function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDurationsChange, prices = {}, onPricesChange }) {
-  const isAll = !selectedIds || selectedIds.length === 0;
+  const allIds = services.map(s => s.id);
+  // A tech can perform EVERY service by default — there is deliberately no
+  // "can do nothing" state. An empty list (or a full one) both mean "all", and
+  // the editor renders every box checked in that case. Unchecking the last
+  // remaining service snaps back to all, so a tech can never end up unable to
+  // perform anything. (Booking/scheduling read empty serviceIds as "all" too.)
+  const isAll = !selectedIds || selectedIds.length === 0 || selectedIds.length >= allIds.length;
+  const checkedSet = isAll ? new Set(allIds) : new Set(selectedIds);
   const grouped = {};
   services.forEach(s => {
     const cat = s.category || 'Other';
@@ -724,12 +733,13 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
   });
 
   function toggle(id) {
-    const set = new Set(selectedIds);
+    const set = new Set(checkedSet);
     if (set.has(id)) set.delete(id); else set.add(id);
-    onChange(Array.from(set));
+    // Empty or full both normalize to [] = "all" — never persist a no-service tech.
+    if (set.size === 0 || set.size >= allIds.length) { onChange([]); return; }
+    onChange(allIds.filter(x => set.has(x)));   // explicit subset, in menu order
   }
-  function selectAll() { onChange(services.map(s => s.id)); }
-  function clearAll()  { onChange([]); }
+  function selectAll() { onChange([]); }   // canonical "all"
 
   // Per-tech override minutes. Empty/0/invalid clears the override (falls
   // back to the service's base duration). Only stores explicit overrides.
@@ -754,14 +764,13 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
   return (
     <>
       <div style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-        Pick which services this tech can perform, and optionally set how long <em>this tech</em> takes ($ and minutes) per service.
-        Leave a field blank to use the service's standard price / time. {isAll && <strong style={{ color: '#16a34a' }}>No services checked = can do every service.</strong>}
+        Every tech can perform <strong>all services by default</strong> — uncheck the ones <em>this tech</em> doesn't do.
+        Optionally set how long this tech takes ($ and minutes) per service; leave a field blank to use the service's standard price / time.
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        <button onClick={selectAll} style={{ ...btnBase, fontSize: 11, padding: '5px 10px' }}>Select all</button>
-        <button onClick={clearAll}  style={{ ...btnBase, fontSize: 11, padding: '5px 10px' }}>Clear all</button>
+        <button onClick={selectAll} disabled={isAll} style={{ ...btnBase, fontSize: 11, padding: '5px 10px', opacity: isAll ? 0.5 : 1 }}>Reset to all</button>
         <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--pn-text-faint)', alignSelf: 'center' }}>
-          {isAll ? 'all' : `${selectedIds.length} of ${services.length}`}
+          {isAll ? 'all services' : `${checkedSet.size} of ${services.length}`}
         </div>
       </div>
       {services.length === 0 ? (
@@ -771,8 +780,8 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--pn-text-muted)', marginBottom: 6, letterSpacing: '.04em', textTransform: 'uppercase' }}>{cat}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 }}>
             {items.map(s => {
-              const checked = selectedIds.includes(s.id);
-              const canDo   = isAll || checked;
+              const checked = checkedSet.has(s.id);
+              const canDo   = checked;
               const override = durations[s.id];
               return (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px', borderRadius: 8, border: `1px solid ${checked ? '#3D95CE' : 'var(--pn-border)'}`, background: checked ? 'var(--pn-info-bg)' : 'var(--pn-bg)' }}>
