@@ -174,6 +174,16 @@ function fmtTime(t) {
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
+// Compact hour-only label for the day-view time axis ("9 AM", "12 PM"). The
+// axis only ever renders on the hour, so the ":00" is redundant — dropping it
+// keeps the narrow left gutter from overflowing off-screen when iOS Dynamic
+// Type is turned up (the "times cut off on the left" bug).
+function fmtHourLabel(t) {
+  if (!t) return '';
+  const h = Number(t.split(':')[0]);
+  return `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
 function statusMeta(t) {
   return {
     scheduled: { label: 'Scheduled', color: t.blue,    bg: t.blueSoft  },
@@ -844,7 +854,7 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
             style={[styles.dayTimelineRow, { height: SLOT_PX }, !inWorkWindow && styles.dayTimelineRowOff, moving && styles.dayTimelineRowDrop]}
           >
             <View style={styles.dayTimeLabel}>
-              {isHourMark && <Text style={[styles.dayTimeLabelText, !inWorkWindow && { color: theme.textFaint }]}>{fmtTime(startTime)}</Text>}
+              {isHourMark && <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.dayTimeLabelText, !inWorkWindow && { color: theme.textFaint }]}>{fmtHourLabel(startTime)}</Text>}
             </View>
             <View style={[styles.dayTimelineSlot, isHourMark && styles.dayTimelineSlotHour]}>
               {slotList.length ? (
@@ -971,8 +981,8 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
               const slotMin = DAY_START_MIN + idx * SLOT_MINUTES;
               if (slotMin % 60 !== 0) return null;
               return (
-                <Text key={idx} style={[styles.gridTimeLabel, { top: idx * SLOT_PX - 7 }]}>
-                  {fmtTime(minToHHMM(slotMin))}
+                <Text key={idx} numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.gridTimeLabel, { top: idx * SLOT_PX - 7 }]}>
+                  {fmtHourLabel(minToHHMM(slotMin))}
                 </Text>
               );
             })}
@@ -2439,7 +2449,7 @@ const makeStyles = (t) => StyleSheet.create({
   dayApptClient:      { fontSize: 13, fontWeight: '700', color: t.text },
   dayApptMeta:        { fontSize: 11, color: t.textMuted, marginTop: 2 },
   dayEmptyHint:       { fontSize: 22, color: t.textMuted, textAlign: 'center', lineHeight: 26, fontWeight: '800' },
-  gridTimeLabel:      { position: 'absolute', right: 6, fontSize: 11, color: t.textMuted, fontWeight: '600' },
+  gridTimeLabel:      { position: 'absolute', left: 0, width: 46, textAlign: 'right', fontSize: 11, color: t.textMuted, fontWeight: '600' },
   gridHeadCell:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: t.border, borderLeftWidth: 1, borderLeftColor: t.border, backgroundColor: t.surfaceAlt },
   gridHeadDot:        { width: 8, height: 8, borderRadius: 4 },
   gridHeadText:       { fontSize: 12.5, fontWeight: '800', color: t.text, flexShrink: 1 },
