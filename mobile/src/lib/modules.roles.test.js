@@ -25,6 +25,15 @@ describe('getVisibleModules — mobile role gating', () => {
     expect(v).toEqual(expect.arrayContaining(['reports', 'walkin', 'hr', 'marketing']));
   });
 
+  it('REGRESSION: isAdmin ALWAYS wins over a non-owner granular role', () => {
+    // The bug: an admin whose getMyTenantRole role resolved to 'staff' lost
+    // Reports/Walk-in. isAdmin must override the cap gate and show everything.
+    for (const role of ['staff', 'scheduler', null, undefined, 'admin']) {
+      const v = ids({ isAdmin: true, role });
+      expect(v).toEqual(expect.arrayContaining(['reports', 'walkin', 'employees', 'hr', 'marketing']));
+    }
+  });
+
   it('a scheduler sees walk-in but NOT reports', () => {
     const v = ids({ role: 'scheduler' });
     expect(v).toContain('walkin');

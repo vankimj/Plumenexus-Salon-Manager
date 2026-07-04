@@ -22,8 +22,9 @@ export default function ManageGridScreen({ navigation }) {
   const { isAdmin, role, plan, loading: accessLoading } = useTenantAccess();
   // Sales & Receipts is a hardcoded tile (not in getVisibleModules); gate it on
   // the same 'reports' capability the Reports/Receipts tiles use, so a nail tech
-  // (staff role — no reports cap) doesn't see it.
-  const canReports = roleExists(role) ? roleCan(role, 'reports') : isAdmin;
+  // (staff role — no reports cap) doesn't see it. isAdmin always wins (an admin's
+  // granular role may resolve to a non-owner value; don't hide it from them).
+  const canReports = isAdmin || (roleExists(role) && roleCan(role, 'reports'));
   const { columns } = useResponsive();
   // 2 cols (phone) → 48.5%, 3 → 31.8%, 4 → 23.4%. space-between handles gaps.
   const tileW = columns === 2 ? '48.5%' : columns === 3 ? '31.8%' : '23.4%';

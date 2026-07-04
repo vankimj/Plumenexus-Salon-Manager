@@ -60,10 +60,15 @@ export function isModuleEnabled(settings, moduleId) {
 export function getVisibleModules(settings, { isAdmin, role, hiddenTiles, customRoles } = {}) {
   const plan = effectivePlan(settings);
   const hidden = new Set(hiddenTiles || settings?.hiddenTiles || []);
-  const known = !!(role && roleExists(role, customRoles));
+  // isAdmin ALWAYS wins: an admin can be flagged admin (bootstrap email / coarse
+  // 'admin') while their granular `role` from getMyTenantRole resolves to a
+  // non-owner value — gating on that role alone would wrongly hide admin tiles.
+  // Treat admins as owner (full caps); gate everyone else on their role's caps.
+  const effRole = isAdmin ? 'owner' : role;
+  const known = !!(effRole && roleExists(effRole, customRoles));
   return MODULES.filter(m => {
-    if (known) { if (m.cap && !roleCan(role, m.cap, customRoles)) return false; }  // RBAC capability gate
-    else if (m.adminOnly && !isAdmin) return false;                                // legacy fallback (no/unknown role)
+    if (known) { if (m.cap && !roleCan(effRole, m.cap, customRoles)) return false; }  // RBAC capability gate
+    else if (m.adminOnly && !isAdmin) return false;                                   // legacy fallback (no/unknown role)
     if (!isModuleAvailableForPlan(m, plan)) return false;
     if (!isModuleEnabled(settings, m.id)) return false;
     if (hidden.has(m.id)) return false;
