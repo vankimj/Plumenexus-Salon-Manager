@@ -15826,6 +15826,14 @@ exports.smsDeliveryStatus = onRequest({ cors: false, timeoutSeconds: 30 }, async
       if (expectedTopic && body.TopicArn !== expectedTopic) { res.status(200).send('ignored'); return; }
       const subUrl = body.SubscribeURL;
       if (!subUrl) { res.status(400).send('missing SubscribeURL'); return; }
+      // SSRF guard: SubscribeURL is attacker-controllable on a spoofed POST, so
+      // only ever fetch a genuine AWS SNS confirmation URL (https + sns.*.amazonaws.com).
+      let host = '';
+      try { const u = new URL(subUrl); if (u.protocol === 'https:') host = u.hostname; } catch { /* bad url */ }
+      if (!/^sns\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
+        console.warn('[smsDeliveryStatus] rejected non-SNS SubscribeURL host:', host || '(unparseable)');
+        res.status(200).send('ignored'); return;
+      }
       const r = await fetch(subUrl).catch(e => ({ _err: e?.message }));
       if (r && r._err) { console.error('[smsDeliveryStatus] confirm fetch failed:', r._err); res.status(500).send('confirm failed'); return; }
       console.log('[smsDeliveryStatus] SNS subscription confirmed');
@@ -15844,6 +15852,13 @@ exports.smsDeliveryStatus = onRequest({ cors: false, timeoutSeconds: 30 }, async
       || (ev.eventTimestamp ? new Date(Number(ev.eventTimestamp)).toISOString() : new Date().toISOString());
 
     if (!messageId) { res.status(200).send('no messageId'); return; }
+    // messageId lands in Firestore doc paths — AWS mints UUIDs, so reject
+    // anything with path separators / odd chars (defensive; also avoids a
+    // doc() throw on a crafted id).
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(messageId)) {
+      console.warn('[smsDeliveryStatus] rejected malformed messageId');
+      res.status(200).send('bad id'); return;
+    }
 
     const db = getFirestore();
     // Spoof-gate #2 + tenant attribution: the outbox maps this messageId to its
