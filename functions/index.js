@@ -109,6 +109,14 @@ const twilioFrom      = defineString('TWILIO_FROM',        { default: '' });
 const smsProvider       = defineString('SMS_PROVIDER',        { default: 'twilio' });
 const awsSmsRegion      = defineString('AWS_SMS_REGION',      { default: '' }); // falls back to AWS_SES_REGION
 const awsSmsOrigination = defineString('AWS_SMS_ORIGINATION', { default: '' }); // shared #/pool, filled after provisioning
+// AWS End User Messaging config set that routes delivery events (SENT/DELIVERED/
+// BLOCKED/CARRIER_BLOCKED/SPAM/…) to an SNS topic → the smsDeliveryStatus CF.
+// Empty = send without delivery tracking (fire-and-forget). Set to 'salon-sms'.
+const awsSmsConfigSet   = defineString('AWS_SMS_CONFIG_SET',  { default: '' });
+// SNS topic the salon-sms config set publishes delivery events to. The
+// smsDeliveryStatus webhook only accepts events (and confirms subscriptions)
+// bearing this exact TopicArn — a cheap spoof-gate on the public endpoint.
+const awsSmsDeliveryTopic = defineString('AWS_SMS_DELIVERY_TOPIC_ARN', { default: 'arn:aws:sns:us-west-2:397712771247:salon-sms-delivery' });
 const { sendViaAwsSms } = require('./lib/awsSms');
 const _smsProviderCache = new Map(); // tenantId → { provider, at }
 
@@ -1010,11 +1018,13 @@ async function sendSms({
   if (provider === 'aws') {
     const origination = awsSmsOrigination.value();
     if (!origination) return { ok: false, error: 'aws_sms_no_origination' };
+    const configurationSet = awsSmsConfigSet.value() || undefined;
     const res = await sendViaAwsSms({
       to:                phone,
       body:              finalBody,
       originationNumber: origination,
       messageType:       kind === 'marketing' ? 'PROMOTIONAL' : 'TRANSACTIONAL',
+      configurationSet,
       config: {
         region:          awsSmsRegion.value() || awsSesRegion.value() || 'us-west-2',
         accessKeyId:     awsAccessKey.value(),
@@ -1029,6 +1039,17 @@ async function sendSms({
     usageLog.logSmsUsage(db, tenantId, {
       kind: `appt_${kind}`, to: phone, body: finalBody, sid: res.messageId, provider: 'aws',
     }).catch(() => {});
+    // Delivery-tracking outbox: map this AWS messageId → its tenant so the
+    // smsDeliveryStatus CF can attribute the carrier events that follow. Only
+    // when a config set is attached (else no events will ever arrive) and a
+    // messageId came back. The messageId is an unguessable UUID → it also gates
+    // event writes (an event we didn't send maps to nothing). Best-effort.
+    if (configurationSet && res.messageId) {
+      db.doc(`smsOutbox/${res.messageId}`).set({
+        tenantId, clientId: clientId || null, kind, dest: phone,
+        createdAt: new Date().toISOString(),
+      }).catch((e) => console.warn(`[sendSms] outbox write failed msg=${res.messageId}:`, e?.message));
+    }
     return { ok: true, sid: res.messageId, twilioStatus: null };
   }
 
@@ -15763,6 +15784,122 @@ exports.sesEventWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (
     console.error('[sesEventWebhook] handler crashed:', e?.message, e?.stack);
     // 200 so AWS doesn't retry-storm us on our own bug. Surfaces in logs.
     res.status(200).send('error');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// AWS End User Messaging — SMS delivery status webhook
+// ───────────────────────────────────────────────────────────────────────
+// PUBLIC endpoint (SNS → HTTPS). Needs run.invoker=allUsers. Receives carrier
+// delivery events for texts sent with the `salon-sms` config set, and records
+// the TRUE outcome per message (DELIVERED / CARRIER_BLOCKED / SPAM / …) so
+// admins can see whether a text actually reached the handset — Verizon et al.
+// silently drop A2P messages AFTER "accepting" them, invisible otherwise.
+//
+// Security posture (matches sesEventWebhook, which also trusts SNS without
+// crypto sig verification): (1) only events/confirmations bearing our exact
+// delivery TopicArn are processed; (2) EVERY Firestore write is gated behind
+// the smsOutbox/{messageId} mapping — messageIds are unguessable UUIDs we
+// generated at send time, so an event we didn't send maps to nothing and is
+// dropped. Net: no external caller can write, spoof a delivery, or attribute
+// an event to a tenant without already knowing a real messageId we minted.
+const SMS_UNDELIVERED = new Set([
+  'TEXT_CARRIER_BLOCKED', 'TEXT_BLOCKED', 'TEXT_SPAM', 'TEXT_INVALID',
+  'TEXT_UNREACHABLE', 'TEXT_CARRIER_UNREACHABLE', 'TEXT_TTL_EXPIRED', 'TEXT_DELIVERY_FAILURE',
+]);
+exports.smsDeliveryStatus = onRequest({ cors: false, timeoutSeconds: 30 }, async (req, res) => {
+  try {
+    const expectedTopic = awsSmsDeliveryTopic.value();
+    const headerType = req.headers['x-amz-sns-message-type'];
+    // SNS POSTs text/plain — Functions won't auto-parse it. Body is JSON per spec.
+    let body = req.body || {};
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+    const type = headerType || body.Type;
+
+    // Spoof-gate #1: only our own delivery topic is honored.
+    if (expectedTopic && body.TopicArn && body.TopicArn !== expectedTopic) {
+      console.warn('[smsDeliveryStatus] rejected foreign TopicArn:', body.TopicArn);
+      res.status(200).send('ignored'); return;
+    }
+
+    if (type === 'SubscriptionConfirmation') {
+      if (expectedTopic && body.TopicArn !== expectedTopic) { res.status(200).send('ignored'); return; }
+      const subUrl = body.SubscribeURL;
+      if (!subUrl) { res.status(400).send('missing SubscribeURL'); return; }
+      // SSRF guard: SubscribeURL is attacker-controllable on a spoofed POST, so
+      // only ever fetch a genuine AWS SNS confirmation URL (https + sns.*.amazonaws.com).
+      let host = '';
+      try { const u = new URL(subUrl); if (u.protocol === 'https:') host = u.hostname; } catch { /* bad url */ }
+      if (!/^sns\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
+        console.warn('[smsDeliveryStatus] rejected non-SNS SubscribeURL host:', host || '(unparseable)');
+        res.status(200).send('ignored'); return;
+      }
+      const r = await fetch(subUrl).catch(e => ({ _err: e?.message }));
+      if (r && r._err) { console.error('[smsDeliveryStatus] confirm fetch failed:', r._err); res.status(500).send('confirm failed'); return; }
+      console.log('[smsDeliveryStatus] SNS subscription confirmed');
+      res.status(200).send('subscribed'); return;
+    }
+    if (type !== 'Notification') { res.status(200).send('ignored'); return; }
+
+    const ev = typeof body.Message === 'string' ? JSON.parse(body.Message) : (body.Message || {});
+    const messageId = ev.messageId || ev.MessageId || ev.context?.messageId || null;
+    const eventType = ev.eventType || ev.messageStatus || 'UNKNOWN';
+    const reason    = ev.messageStatusDescription || ev.statusMessage || '';
+    const carrier   = ev.carrierName || '';
+    const dest      = ev.destinationPhoneNumber || ev.destination || '';
+    const isFinal   = ev.isFinal === true;
+    const ts        = ev.isoTimestamp
+      || (ev.eventTimestamp ? new Date(Number(ev.eventTimestamp)).toISOString() : new Date().toISOString());
+
+    if (!messageId) { res.status(200).send('no messageId'); return; }
+    // messageId lands in Firestore doc paths — AWS mints UUIDs, so reject
+    // anything with path separators / odd chars (defensive; also avoids a
+    // doc() throw on a crafted id).
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(messageId)) {
+      console.warn('[smsDeliveryStatus] rejected malformed messageId');
+      res.status(200).send('bad id'); return;
+    }
+
+    const db = getFirestore();
+    // Spoof-gate #2 + tenant attribution: the outbox maps this messageId to its
+    // tenant. Unknown id (never sent by us, or already TTL'd) → drop silently.
+    const out = await db.doc(`smsOutbox/${messageId}`).get().catch(() => null);
+    if (!out || !out.exists) {
+      console.log(`[smsDeliveryStatus] ${eventType} for unmapped messageId ${messageId} — dropped`);
+      res.status(200).send('unmapped'); return;
+    }
+    const { tenantId, clientId, kind } = out.data();
+    if (!tenantId) { res.status(200).send('no tenant'); return; }
+
+    const delivered = eventType === 'TEXT_DELIVERED';
+    const failed    = SMS_UNDELIVERED.has(eventType);
+    const outcome   = delivered ? 'delivered'
+      : failed ? 'failed'
+      : (eventType === 'TEXT_SUCCESSFUL' ? 'carrier_accepted' : 'pending');
+
+    await db.doc(`tenants/${tenantId}/smsDelivery/${messageId}`).set({
+      messageId, status: eventType, outcome, reason, carrier, dest,
+      clientId: clientId || null, kind: kind || null, isFinal,
+      updatedAt: ts,
+    }, { merge: true }).catch((e) => console.error('[smsDeliveryStatus] status write:', e?.message));
+
+    // Terminal event → mark the outbox finalized (a future cleanup cron can
+    // prune finalized rows; keeps the mapping table from growing unbounded).
+    if (isFinal || delivered || failed) {
+      db.doc(`smsOutbox/${messageId}`).set(
+        { finalized: true, finalStatus: eventType, finalizedAt: ts }, { merge: true }
+      ).catch(() => {});
+    }
+
+    if (failed) {
+      console.warn(`[smsDeliveryStatus] UNDELIVERED ${eventType} tenant=${tenantId} msg=${messageId} carrier=${carrier} (${reason})`);
+    } else {
+      console.log(`[smsDeliveryStatus] ${eventType} tenant=${tenantId} msg=${messageId}${reason ? ' (' + reason + ')' : ''}`);
+    }
+    res.status(200).send('ok');
+  } catch (e) {
+    console.error('[smsDeliveryStatus] handler crashed:', e?.message, e?.stack);
+    res.status(200).send('error'); // 200 so SNS doesn't retry-storm on our bug
   }
 });
 

@@ -186,6 +186,17 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── SMS delivery-tracking outbox ─────────────────────
+    //   `smsOutbox/{awsMessageId}` → { tenantId, clientId, kind, dest }.
+    //   Written by sendSms at send time; read ONLY by the smsDeliveryStatus
+    //   Cloud Function (Admin SDK) to map an AWS delivery event back to its
+    //   tenant. The messageId is an unguessable UUID, so this doubles as the
+    //   spoof-gate on inbound delivery events. Server-only — it maps phone
+    //   numbers to tenants across the whole platform.
+    match /smsOutbox/{messageId} {
+      allow read, write: if false;
+    }
+
     // ── Inbound SMS orphan triage queue ──────────────────
     //   `platform/inboundOrphans/queue/{id}` → { from, to, body, twilioSid, at }.
     //   Populated by twilioInboundSms when a message arrives on the shared
@@ -517,6 +528,16 @@ service cloud.firestore {
       match /logs/{logId} {
         allow create: if isAuthenticated();
         allow read:   if isTenantAdmin(tenantId);
+      }
+
+      // SMS delivery status — one doc per outbound text (keyed by AWS
+      // messageId), written by smsDeliveryStatus (Admin SDK) as carrier
+      // events arrive. Lets admins see whether a text actually delivered
+      // (or was carrier-blocked / spam-filtered). Read: tenant admin.
+      // Write: server-only.
+      match /smsDelivery/{messageId} {
+        allow read:  if isTenantAdmin(tenantId);
+        allow write: if false;
       }
 
       // Notifications — staff create; check-in page can also create the
