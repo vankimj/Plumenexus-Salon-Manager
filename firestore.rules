@@ -70,11 +70,30 @@ service cloud.firestore {
           get(/databases/$(database)/documents/tenants/$(tenantId)/data/users)
             .data.get('scheduleViewOnlyEmails', []);
     }
-    // Staff who may write appointments: any tenant staff EXCEPT a view-only
-    // tech. Admins/owners always qualify (isTenantAdmin short-circuits via
-    // isTenantStaff and admins are never in the view-only list).
+    // A user on the built-in `readonly` role ("view but never change anything").
+    // Maintained by saveUsers/buildStaffProjection as the `readonlyEmails`
+    // projection. readonly is deliberately still in staffEmails (so it keeps its
+    // READS) — this list is what withholds its WRITES. Owners/admins are never
+    // in it (readonly is a distinct role). Absent/empty (pre-backfill tenant) →
+    // false → today's behavior, so a missing backfill never locks anyone out.
+    function isTenantReadonly(tenantId) {
+      return isAuthenticated() &&
+        request.auth.token.email is string &&
+        request.auth.token.email.lower() in
+          get(/databases/$(database)/documents/tenants/$(tenantId)/data/users)
+            .data.get('readonlyEmails', []);
+    }
+    // Tenant staff who may WRITE: any staff EXCEPT a readonly user. Use this on
+    // every write gate that isTenantStaff previously guarded; keep isTenantStaff
+    // on the matching READ so readonly still sees the data. Admins/owners always
+    // qualify (they're never in readonlyEmails).
+    function isTenantWriter(tenantId) {
+      return isTenantStaff(tenantId) && !isTenantReadonly(tenantId);
+    }
+    // Staff who may write appointments: any WRITER EXCEPT a view-only tech.
+    // Admins/owners always qualify (never in the view-only or readonly lists).
     function canEditSchedule(tenantId) {
-      return isTenantStaff(tenantId) && !isScheduleViewOnly(tenantId);
+      return isTenantWriter(tenantId) && !isScheduleViewOnly(tenantId);
     }
     // Capability delegation: caller's email is in this tenant's data/users
     // `capEmails[cap]` projection (maintained by saveUsers / buildCapEmails). Lets
@@ -235,7 +254,8 @@ service cloud.firestore {
       // in-flight cart handoff). Everything money-related goes through
       // recordKioskSale (server-validated) — see isKiosk().
       match /data/checkoutSession {
-        allow read, write: if isTenantStaff(tenantId) || isKiosk(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isKiosk(tenantId);
+        allow write: if isTenantWriter(tenantId) || isKiosk(tenantId);
       }
       // Slim user projections — staff readable. Holds ONLY:
       //   staffEmails  (array of every staff email; rules use this for
@@ -429,7 +449,8 @@ service cloud.firestore {
 
       // Clients: only this tenant's staff can read/write
       match /clients/{clientId} {
-        allow read, write: if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
         // Private sub-doc (insurance intake) — admin-only. Keeps sensitive PII
         // (insurance member IDs, card photos) off the staff-readable parent doc
         // and off the BigQuery clients mirror. Mirrors employees/{id}/private.
@@ -441,7 +462,8 @@ service cloud.firestore {
         // getMyProgress Cloud Function (a subcollection can't cheaply match the
         // caller's email in a rule), so no direct client read here.
         match /progress/{entryId} {
-          allow read, write: if isTenantStaff(tenantId);
+          allow read:  if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
         }
       }
 
@@ -501,7 +523,7 @@ service cloud.firestore {
       // admins/schedulers can manage anyone.
       match /timeOff/{timeOffId} {
         allow read:  if isTenantStaff(tenantId);
-        allow write: if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
       }
 
       // Membership plans (templates): public read so client-portal can browse
@@ -700,7 +722,8 @@ service cloud.firestore {
       // Program templates (week→day→exercise plans): staff (trainers) build and
       // reuse them. No client PII.
       match /programTemplates/{programId} {
-        allow read, write: if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
       }
       // Assigned client programs: staff full access; the portal client whose
       // email matches `clientEmail` can READ their own program (same pattern as
@@ -708,7 +731,7 @@ service cloud.firestore {
       match /clientPrograms/{cpId} {
         allow read:  if isTenantStaff(tenantId) ||
                         (isAuthenticated() && resource.data.clientEmail == request.auth.token.email);
-        allow write: if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
       }
       // Session-credit packs: staff read (balance shown on the client profile),
       // portal client reads their own by email match. Writes come from the
@@ -757,7 +780,8 @@ service cloud.firestore {
       // double-apply store credit / gift-card debits / stock. No sensitive data
       // — just an existence flag + timestamp.
       match /saleMarkers/{saleId} {
-        allow read, write: if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
       }
 
       // Marketing campaigns: admin creates/reads; Cloud Function updates status via admin SDK
@@ -906,7 +930,8 @@ service cloud.firestore {
       // Walk-in turn rotation roster (one doc per day) — only this tenant's
       // staff so the front desk can clock techs in/out and rotate them.
       match /turnRoster/{date} {
-        allow read, write: if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId);
+        allow write: if isTenantWriter(tenantId);
       }
 
       // Attendance / time cards (one doc per day). Admin-only — the React

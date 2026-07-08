@@ -328,7 +328,13 @@ function buildStaffProjection(users, overlay) {
       .filter(u => u && u.email && resolveRoleCaps(u.role, overlay).includes(cap))
       .map(u => lc(u.email)).filter(Boolean)));
   }
-  return { staffEmails, adminEmails, capEmails };
+  // Built-in `readonly` role → the rules' isTenantReadonly() reads this to deny
+  // writes (readonly keeps its reads via staffEmails; isTenantWriter withholds
+  // only writes). MUST match src/lib/userProjections.js buildReadonlyEmails.
+  const readonlyEmails = Array.from(new Set((users || [])
+    .filter(u => u && u.email && normalizeRole(u.role) === 'readonly')
+    .map(u => lc(u.email)).filter(Boolean)));
+  return { staffEmails, adminEmails, capEmails, readonlyEmails };
 }
 // RBAC server enforcement: throw unless the caller's role has `cap` (see
 // lib/rbac.js — kept in sync with src/lib/rbac.js). The UI hides the control;
@@ -3926,10 +3932,10 @@ exports.claimStaffInvite = onCall({ cors: true }, async (request) => {
     };
     if (idx >= 0) users[idx] = merged; else users.push(merged);
 
-    const { staffEmails, adminEmails, capEmails } = buildStaffProjection(users, overlay);
+    const { staffEmails, adminEmails, capEmails, readonlyEmails } = buildStaffProjection(users, overlay);
 
     tx.set(fullRef, { users }, { merge: true });
-    tx.set(projRef, { staffEmails, adminEmails, capEmails }, { merge: true });
+    tx.set(projRef, { staffEmails, adminEmails, capEmails, readonlyEmails }, { merge: true });
     tx.set(inviteRef, { status: 'claimed', claimedByUid: uid, claimedByEmail: email, claimedAt: new Date().toISOString() }, { merge: true });
 
     return { tenantId, role, employeeId: inv.employeeId || null };
@@ -14158,7 +14164,7 @@ exports.recoverUsersFullFromBQ = onCall({ cors: true, timeoutSeconds: 30 }, asyn
   // overlay-aware so custom-role members (and managers) aren't dropped from
   // staffEmails on recovery — a static role list here would lock them out.
   const overlay = await loadCustomRoles(db, tenantId);
-  const { staffEmails, adminEmails, capEmails } = buildStaffProjection(parsed.users, overlay);
+  const { staffEmails, adminEmails, capEmails, readonlyEmails } = buildStaffProjection(parsed.users, overlay);
 
   const snapshotIso = row.timestamp?.value || String(row.timestamp);
   const batch = db.batch();
@@ -14168,7 +14174,7 @@ exports.recoverUsersFullFromBQ = onCall({ cors: true, timeoutSeconds: 30 }, asyn
     _recoveredAt:   new Date().toISOString(),
   });
   batch.set(db.doc(`tenants/${tenantId}/data/users`), {
-    staffEmails, adminEmails, capEmails,
+    staffEmails, adminEmails, capEmails, readonlyEmails,
   }, { merge: true });
   await batch.commit();
 
