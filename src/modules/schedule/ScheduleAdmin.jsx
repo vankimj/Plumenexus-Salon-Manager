@@ -465,19 +465,19 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   }, []);
 
   // Clients whose birthday month+day matches the selected date
-  const birthdayClients = clients.filter(c => {
+  const birthdayClients = useMemo(() => clients.filter(c => {
     if (!c.birthday) return false;
     const [, bm, bd] = c.birthday.split('-');
     const [, dm, dd] = date.split('-');
     return bm === dm && bd === dd;
-  });
+  }), [clients, date]);
 
-  const birthdayEmployees = employees.filter(e => {
+  const birthdayEmployees = useMemo(() => employees.filter(e => {
     if (!e.birthday) return false;
     const [, bm, bd] = e.birthday.split('-');
     const [, dm, dd] = date.split('-');
     return bm === dm && bd === dd;
-  });
+  }), [employees, date]);
 
   // Earliest free start (minutes since midnight) for a tech TODAY, and the
   // default start time for a seated walk-in. Both delegate to the pure,

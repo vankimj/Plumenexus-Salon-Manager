@@ -12747,7 +12747,14 @@ async function findClientByPhone(tenantId, fromPhone) {
   if (!inboundDigits) return null;
   const last10 = inboundDigits.slice(-10);
   const db = getFirestore();
-  const all = await db.collection(`tenants/${tenantId}/clients`).get();
+  const clientsRef = db.collection(`tenants/${tenantId}/clients`);
+  // Fast path: the indexed `phoneDigits` field (last-10, written on create) —
+  // an O(1) equality lookup instead of scanning + downloading every client doc
+  // (incl. base64 photos) on every inbound SMS. Same pattern as the booking
+  // dedup path. Falls back to the full scan only for un-backfilled legacy docs.
+  const idx = await clientsRef.where('phoneDigits', '==', last10).limit(1).get().catch(() => null);
+  if (idx && !idx.empty) { const d = idx.docs[0]; return { id: d.id, ...d.data() }; }
+  const all = await clientsRef.get();
   for (const d of all.docs) {
     const phoneDigits = ((d.data().phone || '') + '').replace(/\D/g, '');
     if (phoneDigits.slice(-10) === last10) return { id: d.id, ...d.data() };
@@ -14834,8 +14841,25 @@ exports.provisionTenantSMS = onCall(
 // in Twilio Console at: Messaging → Compliance → Toll-Free Verification
 // → Status callback URL = `https://<region>-<project>.cloudfunctions.net/twilioStatusWebhook`.
 // Body is form-urlencoded: { TollfreeVerificationSid, Status, RejectionReason? }.
-exports.twilioStatusWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (req, res) => {
+exports.twilioStatusWebhook = onRequest({ cors: false, timeoutSeconds: 30, secrets: [twilioToken] }, async (req, res) => {
   try {
+    // Verify the POST really came from Twilio — same as twilioInboundSms. Without
+    // this, anyone who learns a TollfreeVerificationSid can forge a Status and
+    // flip a tenant's SMS-onboarding state (force 'rejected' = DoS, or a false
+    // 'approved') + spam the owner. Twilio only signs POSTs, so require POST.
+    const tokenForSig = twilioToken.value();
+    const signature   = req.headers['x-twilio-signature'];
+    if (!tokenForSig || !signature) {
+      console.warn('[twilioStatusWebhook] missing signature or auth token');
+      res.status(403).send('Forbidden'); return;
+    }
+    const fullUrl = `https://${req.get('host')}${req.originalUrl || req.url}`;
+    const valid = require('twilio').validateRequest(tokenForSig, signature, fullUrl, req.body || {});
+    if (!valid) {
+      console.warn('[twilioStatusWebhook] invalid signature; rejecting webhook');
+      res.status(403).send('Forbidden'); return;
+    }
+
     const verificationSid = String(req.body?.TollfreeVerificationSid || req.query?.TollfreeVerificationSid || '');
     const status          = String(req.body?.Status                  || req.query?.Status                  || '');
     const rejectionReason = String(req.body?.RejectionReason         || req.query?.RejectionReason         || '');
@@ -15716,6 +15740,14 @@ exports.sesEventWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (
     if (type === 'SubscriptionConfirmation') {
       const subUrl = body.SubscribeURL;
       if (!subUrl) { res.status(400).send('missing SubscribeURL'); return; }
+      // SSRF guard: SubscribeURL is attacker-controllable on a spoofed POST, so
+      // only ever fetch a genuine AWS SNS confirmation URL (https + sns.*.amazonaws.com).
+      let subHost = '';
+      try { const u = new URL(subUrl); if (u.protocol === 'https:') subHost = u.hostname; } catch { /* bad url */ }
+      if (!/^sns\.[a-z0-9-]+\.amazonaws\.com$/.test(subHost)) {
+        console.warn('[sesEventWebhook] rejected non-SNS SubscribeURL host:', subHost || '(unparseable)');
+        res.status(200).send('ignored'); return;
+      }
       // Confirm by hitting the SubscribeURL. AWS retries the
       // confirmation message if we don't, but only a few times — make
       // sure this side succeeds.
