@@ -6,7 +6,7 @@ import {
 } from 'firebase/firestore';
 import { db, callFn } from './firebase';
 import { TENANT_ID } from './tenant';
-import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildCapEmails } from './userProjections';
+import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildReadonlyEmails, buildCapEmails } from './userProjections';
 import { getCustomRoles } from './customRoles';
 import { rosterDocId, appointmentInLocation } from './locations';
 
@@ -311,6 +311,7 @@ export async function ensureStaffEmailsBackfill(users) {
       staffEmails: buildStaffEmails(users, overlay),
       adminEmails: buildAdminEmails(users, overlay),
       scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+      readonlyEmails: buildReadonlyEmails(users),
       capEmails:   buildCapEmails(users, overlay),
     }, { merge: true });
     batch.set(USERS_FULL_REF, { users }, { merge: true });
@@ -361,6 +362,7 @@ export const saveUsers = async (users) => {
     staffEmails: buildStaffEmails(users, overlay),
     adminEmails: buildAdminEmails(users, overlay),
     scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+    readonlyEmails: buildReadonlyEmails(users),
     capEmails:   buildCapEmails(users, overlay),
   }, { merge: true });
   batch.set(USERS_FULL_REF, { users }, { merge: true });

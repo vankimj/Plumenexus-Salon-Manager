@@ -4,7 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db, callFn, auth } from './firebase';
 import { getCurrentTenant } from './currentTenant';
-import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildCapEmails } from './userProjections';
+import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildReadonlyEmails, buildCapEmails } from './userProjections';
 import { getCustomRoles } from './customRoles';
 
 // tenantCol/tenantDoc read getCurrentTenant() at CALL time so a tenant
@@ -1301,6 +1301,7 @@ async function saveUsers(users) {
     staffEmails: buildStaffEmails(users, overlay),
     adminEmails: buildAdminEmails(users, overlay),
     scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+    readonlyEmails: buildReadonlyEmails(users),
     capEmails:   buildCapEmails(users, overlay),
   }, { merge: true });
   batch.set(tenantDoc('usersFull'), { users }, { merge: true });
