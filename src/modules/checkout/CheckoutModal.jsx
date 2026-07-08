@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react';
-import { saveAppointment, fetchClient, saveClient, redeemLoyaltyPoints,
+import { saveAppointment, fetchClient, saveClient,
          fetchGiftCardByCode, fetchGiftCardsByContact, updateGiftCard, createGiftCard,
          fetchPromoByCode, savePromoCode, createReceipt,
          fetchProducts, saveProduct, createReviewRequest,
@@ -663,7 +663,7 @@ function CheckoutInner({ appts: apptsProp, appt, walkInClient = null, initialPro
       // idempotently by saleId. Clients can no longer write clients.credit /
       // giftCards / promoCodes directly (rules), so this is the ONLY path that
       // moves that money. Best-effort like the other post-capture side effects.
-      if (creditApply > 0 || (giftCard && applyGC && gcApply > 0) || promo) {
+      if (creditApply > 0 || (giftCard && applyGC && gcApply > 0) || promo || loyaltyPts > 0) {
         try {
           await callFn('redeemAtCheckout')({
             tenantId: TENANT_ID,
@@ -673,6 +673,7 @@ function CheckoutInner({ appts: apptsProp, appt, walkInClient = null, initialPro
             giftCardId: (giftCard && applyGC && gcApply > 0) ? giftCard.id : null,
             giftCardAmount: (giftCard && applyGC && gcApply > 0) ? gcApply : 0,
             promoId: promo ? promo.id : null,
+            loyaltyPointsToRedeem: loyaltyPts > 0 ? loyaltyPts : 0,
           });
         } catch (e) { console.warn('[checkout] redeemAtCheckout failed:', e?.message); }
       }
@@ -692,11 +693,8 @@ function CheckoutInner({ appts: apptsProp, appt, walkInClient = null, initialPro
           clientEmail = c.email?.trim() || clientEmail;
           clientPhoneOnFile = (c.phone || '').trim();
           // (store-credit decrement now happens server-side in redeemAtCheckout)
-          // Loyalty redemption — atomic decrement (own helper), separate from the
-          // credit read-modify-write so it can't be clobbered by the earn trigger.
-          if (loyaltyPts > 0) {
-            await redeemLoyaltyPoints(primaryClient.id, loyaltyPts, saleId).catch(() => {});
-          }
+          // (loyalty-point decrement now happens server-side in redeemAtCheckout too —
+          //  clients can no longer write clients.loyaltyPoints directly per rules)
         }
       }
       // clientPhone: walk-in tmpPhone OR primary appt's stored phone OR the

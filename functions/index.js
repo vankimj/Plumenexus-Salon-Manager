@@ -266,6 +266,25 @@ async function requireTenantStaff(db, tenantId, request) {
     throw new HttpsError('permission-denied', 'Not a staff member of this tenant');
   }
 }
+// Tenant staff who may WRITE: any staff EXCEPT a readonly user — the server-side
+// mirror of the rules' isTenantWriter (isTenantStaff && !isTenantReadonly). Use on
+// write-intent callables so a readonly user (email in data/users.readonlyEmails) is
+// rejected server-side, not merely hidden in the UI. Bootstrap admins + tenant
+// owners always pass (requireTenantStaff returns early for them; they are never in
+// readonlyEmails, kept in sync by buildStaffProjection).
+async function requireTenantWriter(db, tenantId, request) {
+  await requireTenantStaff(db, tenantId, request);   // must be staff of this tenant first
+  if (await isBootstrapAdmin(request)) return;
+  const email = await callerEmail(request);
+  const tenDoc = await db.doc(`tenants/${tenantId}`).get();
+  if (tenDoc.exists && (tenDoc.data().ownerEmail || '').toLowerCase() === email) return;
+  const usersDoc = await db.doc(`tenants/${tenantId}/data/users`).get();
+  const readonlyEmails = (usersDoc.exists ? (usersDoc.data().readonlyEmails || []) : [])
+    .map(e => String(e || '').toLowerCase());
+  if (readonlyEmails.includes(email)) {
+    throw new HttpsError('permission-denied', 'Your role is read-only and cannot make changes.');
+  }
+}
 async function requireTenantAdmin(db, tenantId, request) {
   if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
   const email = await callerEmail(request);
@@ -3176,10 +3195,11 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
   const isFounder = await isBootstrapAdmin(request);
 
   const tenantsSnap = await db.collection('tenants').get();
-  const results = [];
-  for (const t of tenantsSnap.docs) {
+  // Resolve each active tenant's role for the caller in PARALLEL — the slim
+  // projection reads were previously awaited one-at-a-time in a for-loop.
+  const activeDocs = tenantsSnap.docs.filter(t => (t.data() || {}).active !== false);
+  const resolved = await Promise.all(activeDocs.map(async (t) => {
     const td = t.data() || {};
-    if (td.active === false) continue;
     const tenantId = t.id;
     const ownerEmailLower = (td.ownerEmail || '').toLowerCase();
 
@@ -3202,16 +3222,16 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
       } catch (_) { /* projection unreadable — caller has no role here */ }
     }
 
-    if (role) {
-      results.push({
-        id:         tenantId,
-        name:       td.name || tenantId,
-        plan:       td.plan || null,
-        subdomain:  td.subdomain || tenantId,
-        role,
-      });
-    }
-  }
+    if (!role) return null;
+    return {
+      id:         tenantId,
+      name:       td.name || tenantId,
+      plan:       td.plan || null,
+      subdomain:  td.subdomain || tenantId,
+      role,
+    };
+  }));
+  const results = resolved.filter(Boolean);
 
   // Sort: tenant where role is admin first, then by name.
   results.sort((a, b) => {
@@ -4697,7 +4717,7 @@ exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
   if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
   const tok = request.auth.token || {};
   const isKioskCaller = tok.kiosk === true && tok.tenantId === tenantId;
-  if (!isKioskCaller) await requireTenantStaff(db, tenantId, request);
+  if (!isKioskCaller) await requireTenantWriter(db, tenantId, request);
 
   const clean = (v, n) => (v ? String(v).slice(0, n) : null);
   const saleId         = clean(d.saleId, 64);
@@ -4707,6 +4727,14 @@ exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
   const creditToApply  = Math.max(0, Number(d.creditToApply) || 0);
   const issueCredit    = Math.max(0, Number(d.issueCredit) || 0);   // change-to-store-credit
   const giftCardAmount = Math.max(0, Number(d.giftCardAmount) || 0);
+  const loyaltyPointsToRedeem = Math.max(0, Math.floor(Number(d.loyaltyPointsToRedeem) || 0));
+  // CAP: change-to-store-credit may never exceed the sale's actual change due (what
+  // the client overpaid). Anything more would MINT credit from nothing, so reject.
+  // Callers MUST send maxIssueCredit (the change due) whenever issuing credit.
+  const maxIssueCredit = Math.max(0, Number(d.maxIssueCredit) || 0);
+  if (issueCredit > 0 && issueCredit > maxIssueCredit + 0.005) {
+    throw new HttpsError('invalid-argument', 'issueCredit exceeds the change due for this sale');
+  }
   const nowIso = new Date().toISOString();
   // Idempotency marker keyed by saleId — a retry (or offline replay) returns the
   // recorded result without decrementing a second time.
@@ -4715,24 +4743,40 @@ exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
   return await db.runTransaction(async (tx) => {
     // Firestore: ALL reads before ANY writes.
     const markSnap = saleId ? await tx.get(markRef) : null;
-    if (markSnap && markSnap.exists) return markSnap.data().result || { appliedCredit: 0, appliedGiftCard: 0, promoApplied: false, alreadyApplied: true };
+    if (markSnap && markSnap.exists) { const saved = markSnap.data().result; return saved ? { ...saved, alreadyApplied: true } : { appliedCredit: 0, appliedGiftCard: 0, promoApplied: false, alreadyApplied: true }; }
 
-    const cRef = ((creditToApply > 0 || issueCredit > 0) && clientId) ? db.doc(`tenants/${tenantId}/clients/${clientId}`) : null;
+    const cRef = ((creditToApply > 0 || issueCredit > 0 || loyaltyPointsToRedeem > 0) && clientId) ? db.doc(`tenants/${tenantId}/clients/${clientId}`) : null;
     const gRef = (giftCardAmount > 0 && giftCardId) ? db.doc(`tenants/${tenantId}/giftCards/${giftCardId}`) : null;
     const pRef = promoId ? db.doc(`tenants/${tenantId}/promoCodes/${promoId}`) : null;
     const cSnap = cRef ? await tx.get(cRef) : null;
     const gSnap = gRef ? await tx.get(gRef) : null;
     const pSnap = pRef ? await tx.get(pRef) : null;
 
-    const result = { appliedCredit: 0, issuedCredit: 0, appliedGiftCard: 0, promoApplied: false };
+    const result = { appliedCredit: 0, issuedCredit: 0, redeemedLoyaltyPoints: 0, appliedGiftCard: 0, promoApplied: false };
 
     if (cSnap) {
-      const cur = Number(cSnap.data()?.credit) || 0;
+      const cData = cSnap.data() || {};
+      const cur = Number(cData.credit) || 0;
       const applied = Math.max(0, Math.min(creditToApply, cur));   // redeem capped to real balance
       const newCredit = Math.max(0, cur - applied) + issueCredit;  // then add any change-to-credit
-      if (applied > 0 || issueCredit > 0) tx.set(cRef, { credit: newCredit, updatedAt: nowIso }, { merge: true });
+      // Loyalty redemption — capped to the client's REAL points balance and
+      // decremented in THIS transaction (loyaltyPoints/loyaltyHistory mirror
+      // creditLoyaltyOnReceipt, the earn trigger).
+      const curPts = Number(cData.loyaltyPoints) || 0;
+      const redeemedPts = Math.max(0, Math.min(loyaltyPointsToRedeem, curPts));
+      const patch = { updatedAt: nowIso };
+      if (applied > 0 || issueCredit > 0) patch.credit = newCredit;
+      if (redeemedPts > 0) patch.loyaltyPoints = Math.max(0, curPts - redeemedPts);
+      if (patch.credit !== undefined || patch.loyaltyPoints !== undefined) tx.set(cRef, patch, { merge: true });
+      if (redeemedPts > 0) {
+        tx.set(cRef.collection('loyaltyHistory').doc(), {
+          type: 'redeem', points: -redeemedPts, receiptId: saleId || null,
+          reason: 'Redeemed at checkout', createdAt: nowIso,
+        });
+      }
       result.appliedCredit = applied;
       result.issuedCredit = issueCredit;
+      result.redeemedLoyaltyPoints = redeemedPts;
     }
     if (gSnap && gSnap.exists) {
       const g = gSnap.data();
@@ -15732,12 +15776,19 @@ exports.runIntegrityScan = onSchedule(
         checks.usersFullSync = { status: 'red', error: e?.message || 'failed' };
       }
 
+      // Appointments feed BOTH checks #2 and #3 — read the collection ONCE
+      // (it's the largest per tenant) and reuse the snapshot below.
+      let apptsSnap = null, apptsErr = null;
+      try {
+        apptsSnap = await db.collection(`tenants/${tenantId}/appointments`).get();
+      } catch (e) {
+        apptsErr = e;
+      }
+
       // 2. Orphaned appointments (clientId references missing client, non-walk-in only)
       try {
-        const [apptsSnap, clientsSnap] = await Promise.all([
-          db.collection(`tenants/${tenantId}/appointments`).get(),
-          db.collection(`tenants/${tenantId}/clients`).get(),
-        ]);
+        if (apptsErr) throw apptsErr;
+        const clientsSnap = await db.collection(`tenants/${tenantId}/clients`).get();
         const clientIds = new Set(clientsSnap.docs.map(d => d.id));
         const orphans = [];
         let total = 0;
@@ -15759,11 +15810,9 @@ exports.runIntegrityScan = onSchedule(
 
       // 3. Orphaned receipts (apptIds reference missing appointments)
       try {
-        const [receiptsSnap, apptsSnap2] = await Promise.all([
-          db.collection(`tenants/${tenantId}/receipts`).get(),
-          db.collection(`tenants/${tenantId}/appointments`).get(),
-        ]);
-        const apptIdSet = new Set(apptsSnap2.docs.map(d => d.id));
+        if (apptsErr) throw apptsErr;
+        const receiptsSnap = await db.collection(`tenants/${tenantId}/receipts`).get();
+        const apptIdSet = new Set(apptsSnap.docs.map(d => d.id));
         const orphans = [];
         let total = 0;
         for (const d of receiptsSnap.docs) {

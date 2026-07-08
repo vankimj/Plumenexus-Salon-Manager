@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { fetchServices, fetchEmployees, fetchWebfrontConfig, fetchBookingConfig, fetchGoogleReviews, subscribeWebfrontConfig } from '../../lib/firestore';
 import { getTheme, detectAutoTheme } from '../../lib/themes';
 import { TENANT_ID } from '../../lib/tenant';
+import { normURL } from '../../utils/helpers';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../../lib/firebase';
 import HeroMerakiSite from '../../components/HeroMerakiSite';
@@ -590,7 +591,7 @@ export default function SalonWebfront() {
               </div>
               {cfg.googleReviewUrl && (
                 <div style={{ textAlign:'center', marginTop:40 }}>
-                  <a href={cfg.googleReviewUrl} target="_blank" rel="noopener noreferrer"
+                  <a href={normURL(cfg.googleReviewUrl)} target="_blank" rel="noopener noreferrer"
                     style={{ display:'inline-flex', alignItems:'center', gap:8, height:48, borderRadius:24, background:'#fff', color:'#333', fontSize:14, fontWeight:600, padding:'0 28px', textDecoration:'none', border:'1.5px solid #e0e0e0', boxShadow:'0 2px 8px rgba(0,0,0,.07)' }}>
                     <GoogleGLogo size={18} /> See all Google reviews ↗
                   </a>
@@ -842,7 +843,7 @@ function ReviewCard({ review, isGoogle, googleReviewUrl, tm }) {
       </div>
     </div>
   );
-  const href = review.authorUrl || googleReviewUrl;
+  const href = normURL(review.authorUrl) || normURL(googleReviewUrl);
   return href
     ? <a href={href} target="_blank" rel="noopener noreferrer" style={{ textDecoration:'none', display:'block' }}>{card}</a>
     : card;

@@ -125,8 +125,10 @@ export async function softDeleteRecurringSeries(groupId, by, { fromDate = null }
 }
 
 // ── Clients ────────────────────────────────────────────
-export async function fetchClients() {
-  const snap = await getDocs(query(tenantCol('clients'), orderBy('name')));
+export async function fetchClients({ max } = {}) {
+  const constraints = [orderBy('name')];
+  if (max) constraints.push(limit(max));
+  const snap = await getDocs(query(tenantCol('clients'), ...constraints));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
@@ -636,8 +638,8 @@ export async function resendReceiptEmail({ receiptId = null, viewToken = null, e
 // cash) or 'credit' (store credit, no money moves). Staff (admin or tech) may
 // call it; the server notifies all admins. `idempotencyKey` (stable per attempt)
 // makes a retry safe — no double refund or double credit.
-export async function refundSale({ receiptId, amountCents, reason, refundTo = 'money', commissionByTech, idempotencyKey }) {
-  const res = await callFn('refundSale')({ tenantId: getCurrentTenant(), receiptId, amountCents, reason, refundTo, commissionByTech, idempotencyKey });
+export async function refundSale({ receiptId = null, apptId = null, amountCents, reason, refundTo = 'money', commissionByTech, idempotencyKey }) {
+  const res = await callFn('refundSale')({ tenantId: getCurrentTenant(), receiptId, apptId, amountCents, reason, refundTo, commissionByTech, idempotencyKey });
   return res?.data || { ok: false };
 }
 // Staff-initiated customer cancellation notice (email + SMS, rebook link, no
