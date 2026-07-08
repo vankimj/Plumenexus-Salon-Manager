@@ -1,6 +1,8 @@
 import { buildTechSplit, genReceiptToken } from './checkout';
 import { defaultWalkIn } from './metrics';
-import { updateAppointment, updateGiftCard, savePromoCode, saveProduct, createReceipt, fetchClient, saveClient, redeemLoyaltyPoints, claimSaleSideEffects } from './firestore';
+import { updateAppointment, saveProduct, createReceipt, fetchClient, redeemLoyaltyPoints, claimSaleSideEffects } from './firestore';
+import { callFn } from './firebase';
+import { getCurrentTenant } from './currentTenant';
 
 // Writes a completed sale, shared by the tech checkout (CheckoutScreen) and the
 // front-desk kiosk so both produce IDENTICAL receipts (no duplicated money
@@ -69,32 +71,30 @@ export async function completeSale({
   let runSideEffects = !skipSideEffects;
   if (runSideEffects && saleId) runSideEffects = await claimSaleSideEffects(saleId);
   if (runSideEffects) {
-    if (giftCard && t.gcApply > 0) {
-      try { await updateGiftCard(giftCard.id, { balance: Math.max((giftCard.balance || 0) - t.gcApply, 0) }); }
-      catch (e) { sideEffectErrors.push('Gift card not debited: ' + (e?.message || 'failed')); }
-    }
-    if (promo) {
+    const issued = Number(issueCredit) || 0;
+    const creditClientId = (tab.appts || []).map(a => a.clientId).find(Boolean) || null;
+    // Server-authoritative redemptions: store-credit + gift-card decrement (each
+    // capped to the real balance) + promo usage + any staff-issued credit, applied
+    // atomically and idempotently by saleId. Clients can no longer write
+    // clients.credit / giftCards / promoCodes directly (rules) — this callable is
+    // the only path that moves that money (also fixes the old silently-swallowed
+    // non-admin gift-card/promo writes). Best-effort: never throws.
+    if (t.creditApply > 0 || issued > 0 || (giftCard && t.gcApply > 0) || promo) {
       try {
-        const newCount = (promo.usedCount || 0) + 1;
-        const maxHit = promo.maxUses && newCount >= promo.maxUses;
-        await savePromoCode(promo.id, { usedCount: newCount, ...((promo.singleUse || maxHit) ? { active: false } : {}) });
-      } catch (e) { sideEffectErrors.push('Promo not updated: ' + (e?.message || 'failed')); }
+        await callFn('redeemAtCheckout')({
+          tenantId: getCurrentTenant(),
+          saleId,
+          clientId: creditClientId,
+          creditToApply: Number(t.creditApply) || 0,
+          issueCredit: issued,
+          giftCardId: (giftCard && t.gcApply > 0) ? giftCard.id : null,
+          giftCardAmount: (giftCard && t.gcApply > 0) ? t.gcApply : 0,
+          promoId: promo ? promo.id : null,
+        });
+      } catch (e) { sideEffectErrors.push('Redemptions not applied: ' + (e?.message || 'failed')); }
     }
     for (const it of products) {
       await saveProduct(it.product.id, { stock: Math.max(0, (Number(it.product.stock) || 0) - it.qty) }).catch(() => {});
-    }
-    // Client store-credit bookkeeping, in ONE write (mirrors web): deduct
-    // exactly what the totals applied, then add any staff-issued goodwill
-    // credit. Best-effort + retry-guarded (skipSideEffects) so a re-save never
-    // double-deducts or double-issues.
-    const issued = Number(issueCredit) || 0;
-    const creditClientId = (tab.appts || []).map(a => a.clientId).find(Boolean) || null;
-    if ((t.creditApply > 0 || issued > 0) && creditClientId) {
-      try {
-        const c = await fetchClient(creditClientId);
-        const newCredit = Math.max((Number(c?.credit) || 0) - t.creditApply, 0) + issued;
-        await saveClient(creditClientId, { credit: newCredit });
-      } catch (e) { sideEffectErrors.push('Store credit not updated: ' + (e?.message || 'failed')); }
     }
     // Loyalty redemption — atomic decrement (own helper), race-safe vs the
     // server earn trigger's atomic increment.

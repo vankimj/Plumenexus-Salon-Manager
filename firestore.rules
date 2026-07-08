@@ -450,7 +450,17 @@ service cloud.firestore {
       // Clients: only this tenant's staff can read/write
       match /clients/{clientId} {
         allow read:  if isTenantStaff(tenantId);
-        allow write: if isTenantWriter(tenantId);
+        // Non-admin staff may write client profiles but NOT the `credit` (store
+        // credit = real money) field — a tech could otherwise set credit=9999 and
+        // redeem it, minting money with no ledger entry. All credit changes go
+        // through the adjustClientCredit / redeemAtCheckout callables (Admin SDK,
+        // which bypasses rules + writes the immutable ledger). Admins may still
+        // edit it directly. create: block a non-zero credit on new docs.
+        allow create: if isTenantWriter(tenantId)
+          && (isTenantAdmin(tenantId) || !('credit' in request.resource.data) || request.resource.data.credit == 0);
+        allow update: if isTenantWriter(tenantId)
+          && (isTenantAdmin(tenantId) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['credit']));
+        allow delete: if isTenantWriter(tenantId);
         // Private sub-doc (insurance intake) — admin-only. Keeps sensitive PII
         // (insurance member IDs, card photos) off the staff-readable parent doc
         // and off the BigQuery clients mirror. Mirrors employees/{id}/private.
