@@ -4678,6 +4678,85 @@ exports.recordKioskSale = onCall({ secrets: [stripeKey], cors: true }, async (re
   return { ok: true, saleId, total: totals.total, changeDue, sideEffectErrors };
 });
 
+// ── Server-authoritative checkout redemptions ─────────────────────────────────
+// Applies the money-BALANCE mutations a POS checkout must not do from the client:
+// store-credit decrement, gift-card decrement, and promo usage — each CAPPED to
+// the real balance/limit and applied in ONE atomic transaction, idempotent by
+// saleId. This is what lets the rules DENY direct client writes to clients.credit
+// (a tech could otherwise set credit=9999 and redeem it) and moves gift-card /
+// promo redemption off the client (was a non-atomic double-spend, and silently
+// permission-denied for non-admin staff). Returns the amounts ACTUALLY applied so
+// the caller stamps them on the receipt. Receipt/appt/ledger/loyalty are unchanged
+// (ledger + loyalty are receipt-trigger driven).
+exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
+  const db = getFirestore();
+  const d = request.data || {};
+  const tenantId = String(d.tenantId || TENANT_ID).slice(0, 64);
+  if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) throw new HttpsError('invalid-argument', 'Invalid tenantId');
+  if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const tok = request.auth.token || {};
+  const isKioskCaller = tok.kiosk === true && tok.tenantId === tenantId;
+  if (!isKioskCaller) await requireTenantStaff(db, tenantId, request);
+
+  const clean = (v, n) => (v ? String(v).slice(0, n) : null);
+  const saleId         = clean(d.saleId, 64);
+  const clientId       = clean(d.clientId, 128);
+  const giftCardId     = clean(d.giftCardId, 128);
+  const promoId        = clean(d.promoId, 128);
+  const creditToApply  = Math.max(0, Number(d.creditToApply) || 0);
+  const issueCredit    = Math.max(0, Number(d.issueCredit) || 0);   // change-to-store-credit
+  const giftCardAmount = Math.max(0, Number(d.giftCardAmount) || 0);
+  const nowIso = new Date().toISOString();
+  // Idempotency marker keyed by saleId — a retry (or offline replay) returns the
+  // recorded result without decrementing a second time.
+  const markRef = db.doc(`tenants/${tenantId}/checkoutRedemptions/${saleId || genServerReceiptToken(20)}`);
+
+  return await db.runTransaction(async (tx) => {
+    // Firestore: ALL reads before ANY writes.
+    const markSnap = saleId ? await tx.get(markRef) : null;
+    if (markSnap && markSnap.exists) return markSnap.data().result || { appliedCredit: 0, appliedGiftCard: 0, promoApplied: false, alreadyApplied: true };
+
+    const cRef = ((creditToApply > 0 || issueCredit > 0) && clientId) ? db.doc(`tenants/${tenantId}/clients/${clientId}`) : null;
+    const gRef = (giftCardAmount > 0 && giftCardId) ? db.doc(`tenants/${tenantId}/giftCards/${giftCardId}`) : null;
+    const pRef = promoId ? db.doc(`tenants/${tenantId}/promoCodes/${promoId}`) : null;
+    const cSnap = cRef ? await tx.get(cRef) : null;
+    const gSnap = gRef ? await tx.get(gRef) : null;
+    const pSnap = pRef ? await tx.get(pRef) : null;
+
+    const result = { appliedCredit: 0, issuedCredit: 0, appliedGiftCard: 0, promoApplied: false };
+
+    if (cSnap) {
+      const cur = Number(cSnap.data()?.credit) || 0;
+      const applied = Math.max(0, Math.min(creditToApply, cur));   // redeem capped to real balance
+      const newCredit = Math.max(0, cur - applied) + issueCredit;  // then add any change-to-credit
+      if (applied > 0 || issueCredit > 0) tx.set(cRef, { credit: newCredit, updatedAt: nowIso }, { merge: true });
+      result.appliedCredit = applied;
+      result.issuedCredit = issueCredit;
+    }
+    if (gSnap && gSnap.exists) {
+      const g = gSnap.data();
+      const cur = Number(g?.balance) || 0;
+      const applied = Math.max(0, Math.min(giftCardAmount, cur));
+      if (applied > 0) { tx.set(gRef, { balance: Math.max(0, cur - applied), updatedAt: nowIso }, { merge: true }); result.appliedGiftCard = applied; }
+    }
+    if (pSnap && pSnap.exists) {
+      const p = pSnap.data();
+      const newCount = (Number(p.usedCount) || 0) + 1;
+      const maxHit = p.maxUses && newCount >= p.maxUses;
+      tx.set(pRef, {
+        usedCount: newCount,
+        ...((p.singleUse || maxHit) ? { active: false } : {}),
+        ...(p.singleUse ? { usedAt: nowIso } : {}),
+        updatedAt: nowIso,
+      }, { merge: true });
+      result.promoApplied = true;
+    }
+
+    if (saleId) tx.set(markRef, { result, saleId, at: nowIso }, { merge: true });
+    return result;
+  });
+});
+
 // Verify the CALLER's own kiosk-exit PIN (to leave a locked kiosk). request.auth
 // identifies the admin who entered; only their own PIN unlocks. Returns {ok}.
 exports.verifyKioskPin = onCall({ cors: true }, async (request) => {
