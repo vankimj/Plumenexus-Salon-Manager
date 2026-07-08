@@ -18,6 +18,7 @@ const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notifi
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
+const recordSaleLib        = require('./lib/recordSale');
 const ledger               = require('./lib/ledger');
 const { renderTemplate, getTemplatePhrases } = require('./lib/messageTemplates');
 
@@ -4755,6 +4756,58 @@ exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
     if (saleId) tx.set(markRef, { result, saleId, at: nowIso }, { merge: true });
     return result;
   });
+});
+
+// ── Server-authoritative sale recording (web + mobile staff POS) ──────────────
+// Writes the canonical receipt + marks appts done SERVER-side so a tech can't
+// author a receipt that inflates their own commission/payroll. Two guarantees:
+//   1. Card: the Stripe PaymentIntent must have captured the recorded total for
+//      THIS tenant (verifyCapture) — you can't record more revenue than was paid.
+//   2. techSplit is DERIVED server-side from the line items (buildTechSplit with
+//      the client's tipByTech, so a legit split matches exactly) — you can't
+//      hand-craft a split. The total is NOT re-derived (taken from the client's
+//      charged total + verified against the capture), so the charge math can't
+//      diverge and reject a legit sale. Idempotent by saleId. Redemptions stay in
+//      redeemAtCheckout; product stock + loyalty stay client-side.
+exports.recordSale = onCall({ secrets: [stripeKey], cors: true }, async (request) => {
+  const db = getFirestore();
+  const d = request.data || {};
+  const tenantId = String(d.tenantId || TENANT_ID).slice(0, 64);
+  if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) throw new HttpsError('invalid-argument', 'Invalid tenantId');
+  if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const tok = request.auth.token || {};
+  const isKioskCaller = tok.kiosk === true && tok.tenantId === tenantId;
+  if (!isKioskCaller) await requireTenantStaff(db, tenantId, request);
+  const paidBy = (tok.email || '').toLowerCase() || (isKioskCaller ? 'kiosk' : 'staff');
+
+  const saleId = String(d.saleId || genServerReceiptToken(20)).slice(0, 64);
+  const rcptRef = db.doc(`tenants/${tenantId}/receipts/${saleId}`);
+  if ((await rcptRef.get()).exists) return { ok: true, alreadyRecorded: true, saleId };
+
+  const method = d.method === 'card' ? 'card' : 'cash';
+  const nowIso = new Date().toISOString();
+  const built = recordSaleLib.buildSaleRecords({ ...d, saleId, method, paidBy, nowIso });
+
+  if (method === 'card') {
+    const piId = d.stripePaymentIntentId ? String(d.stripePaymentIntentId).slice(0, 64) : null;
+    if (!/^pi_[A-Za-z0-9]+$/.test(piId || '')) throw new HttpsError('invalid-argument', 'Valid stripePaymentIntentId required');
+    const key = stripeKey.value();
+    if (!key) throw new HttpsError('failed-precondition', 'Stripe is not configured');
+    const pi = await require('stripe')(key).paymentIntents.retrieve(piId);
+    const chk = recordSaleLib.verifyCapture({ method, pi, tenantId, expectedChargeCents: built.expectedChargeCents });
+    if (!chk.ok) throw new HttpsError('failed-precondition', `Payment verification failed (${chk.reason})`);
+    built.receipt.payment.stripePaymentIntentId = piId;
+  }
+
+  const sideEffectErrors = [];
+  for (const u of built.apptUpdates) {
+    await db.doc(`tenants/${tenantId}/appointments/${u.id}`)
+      .set({ status: 'done', payment: { ...built.receipt.payment, amountForThisAppt: u.apptSubtotal }, updatedAt: nowIso }, { merge: true })
+      .catch(e => sideEffectErrors.push('appt: ' + (e?.message || 'failed')));
+  }
+  await rcptRef.set(built.receipt, { merge: true });
+
+  return { ok: true, saleId, total: built.payment.total, changeDue: built.changeDue, split: built.payment.techSplit, sideEffectErrors };
 });
 
 // Verify the CALLER's own kiosk-exit PIN (to leave a locked kiosk). request.auth
