@@ -4788,7 +4788,12 @@ exports.recordSale = onCall({ secrets: [stripeKey], cors: true }, async (request
   const nowIso = new Date().toISOString();
   const built = recordSaleLib.buildSaleRecords({ ...d, saleId, method, paidBy, nowIso });
 
-  if (method === 'card') {
+  // Only require + verify a PaymentIntent when there was actually something to
+  // charge. A "card" sale fully covered by gift card / store credit / loyalty
+  // has expectedChargeCents === 0 and no PI — recording it must NOT throw (that
+  // would lose the sale while the redemption already ran). Adversarial-review
+  // finding: $0-card = silent data loss.
+  if (method === 'card' && built.expectedChargeCents > 0) {
     const piId = d.stripePaymentIntentId ? String(d.stripePaymentIntentId).slice(0, 64) : null;
     if (!/^pi_[A-Za-z0-9]+$/.test(piId || '')) throw new HttpsError('invalid-argument', 'Valid stripePaymentIntentId required');
     const key = stripeKey.value();
