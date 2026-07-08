@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { TENANT_ID } from '../lib/tenant';
+import { normURL } from '../utils/helpers';
 
 // Public "Recommended Gear" storefront. Reached at `/?gear` (optionally
 // `&tid=`). Reads safe product fields via getRecommendedGear; each "Shop"
@@ -59,7 +60,7 @@ export default function GearStorefront() {
                   {p.description && <div style={{ fontSize: 12.5, color: C.muted, lineHeight: 1.5, flex: 1 }}>{p.description}</div>}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                     {p.price > 0 && <span style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>~${p.price}</span>}
-                    <a href={p.shopUrl} target="_blank" rel="noopener noreferrer sponsored"
+                    <a href={normURL(p.shopUrl)} target="_blank" rel="noopener noreferrer sponsored"
                       style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: '#fff', background: C.plum, padding: '8px 16px', borderRadius: 999, textDecoration: 'none' }}>
                       Shop →
                     </a>

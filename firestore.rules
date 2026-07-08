@@ -457,9 +457,10 @@ service cloud.firestore {
         // which bypasses rules + writes the immutable ledger). Admins may still
         // edit it directly. create: block a non-zero credit on new docs.
         allow create: if isTenantWriter(tenantId)
-          && (isTenantAdmin(tenantId) || !('credit' in request.resource.data) || request.resource.data.credit == 0);
+          && (isTenantAdmin(tenantId) || !('credit' in request.resource.data) || request.resource.data.credit == 0)
+          && (isTenantAdmin(tenantId) || !('loyaltyPoints' in request.resource.data) || request.resource.data.loyaltyPoints == 0);
         allow update: if isTenantWriter(tenantId)
-          && (isTenantAdmin(tenantId) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['credit']));
+          && (isTenantAdmin(tenantId) || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['credit', 'loyaltyPoints']));
         allow delete: if isTenantWriter(tenantId);
         // Private sub-doc (insurance intake) — admin-only. Keeps sensitive PII
         // (insurance member IDs, card photos) off the staff-readable parent doc

@@ -1,6 +1,6 @@
 import { buildTechSplit, genReceiptToken } from './checkout';
 import { defaultWalkIn } from './metrics';
-import { updateAppointment, saveProduct, createReceipt, fetchClient, redeemLoyaltyPoints, claimSaleSideEffects } from './firestore';
+import { updateAppointment, saveProduct, createReceipt, fetchClient, claimSaleSideEffects } from './firestore';
 import { callFn } from './firebase';
 import { getCurrentTenant } from './currentTenant';
 
@@ -79,7 +79,7 @@ export async function completeSale({
     // clients.credit / giftCards / promoCodes directly (rules) — this callable is
     // the only path that moves that money (also fixes the old silently-swallowed
     // non-admin gift-card/promo writes). Best-effort: never throws.
-    if (t.creditApply > 0 || issued > 0 || (giftCard && t.gcApply > 0) || promo) {
+    if (t.creditApply > 0 || issued > 0 || (giftCard && t.gcApply > 0) || promo || Number(t.loyaltyPts) > 0) {
       try {
         await callFn('redeemAtCheckout')({
           tenantId: getCurrentTenant(),
@@ -87,20 +87,19 @@ export async function completeSale({
           clientId: creditClientId,
           creditToApply: Number(t.creditApply) || 0,
           issueCredit: issued,
+          // The server caps issueCredit to this — the actual cash overpayment
+          // for the sale (tendered − total), so change-to-credit can never mint
+          // more than was overpaid.
+          maxIssueCredit: Math.max(0, (Number(cashTendered) || 0) - (Number(t.total) || 0)),
           giftCardId: (giftCard && t.gcApply > 0) ? giftCard.id : null,
           giftCardAmount: (giftCard && t.gcApply > 0) ? t.gcApply : 0,
           promoId: promo ? promo.id : null,
+          loyaltyPointsToRedeem: Number(t.loyaltyPts) || 0,
         });
       } catch (e) { sideEffectErrors.push('Redemptions not applied: ' + (e?.message || 'failed')); }
     }
     for (const it of products) {
       await saveProduct(it.product.id, { stock: Math.max(0, (Number(it.product.stock) || 0) - it.qty) }).catch(() => {});
-    }
-    // Loyalty redemption — atomic decrement (own helper), race-safe vs the
-    // server earn trigger's atomic increment.
-    if (Number(t.loyaltyPts) > 0 && creditClientId) {
-      try { await redeemLoyaltyPoints(creditClientId, t.loyaltyPts, saleId); }
-      catch (e) { sideEffectErrors.push('Loyalty points not updated: ' + (e?.message || 'failed')); }
     }
   }
 
