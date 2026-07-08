@@ -1396,7 +1396,9 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated })
   // that should narrow with search.
   const filteredClients = useMemo(() => {
     const q = clientQuery.trim().toLowerCase();
-    if (!q) return clients.slice(0, 200);
+    // No query: show only the first 30 (staff search by name) so tapping a slot
+    // doesn't mount hundreds of TouchableOpacity rows in a non-virtualized list.
+    if (!q) return clients.slice(0, 30);
     return clients.filter(c => (c.name || '').toLowerCase().includes(q)).slice(0, 200);
   }, [clientQuery, clients]);
 

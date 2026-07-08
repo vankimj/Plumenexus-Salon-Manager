@@ -12747,7 +12747,14 @@ async function findClientByPhone(tenantId, fromPhone) {
   if (!inboundDigits) return null;
   const last10 = inboundDigits.slice(-10);
   const db = getFirestore();
-  const all = await db.collection(`tenants/${tenantId}/clients`).get();
+  const clientsRef = db.collection(`tenants/${tenantId}/clients`);
+  // Fast path: the indexed `phoneDigits` field (last-10, written on create) —
+  // an O(1) equality lookup instead of scanning + downloading every client doc
+  // (incl. base64 photos) on every inbound SMS. Same pattern as the booking
+  // dedup path. Falls back to the full scan only for un-backfilled legacy docs.
+  const idx = await clientsRef.where('phoneDigits', '==', last10).limit(1).get().catch(() => null);
+  if (idx && !idx.empty) { const d = idx.docs[0]; return { id: d.id, ...d.data() }; }
+  const all = await clientsRef.get();
   for (const d of all.docs) {
     const phoneDigits = ((d.data().phone || '') + '').replace(/\D/g, '');
     if (phoneDigits.slice(-10) === last10) return { id: d.id, ...d.data() };

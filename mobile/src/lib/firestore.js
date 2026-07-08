@@ -949,7 +949,7 @@ export async function fetchIntegrityReport() {
 
 // In-app feedback (bug/idea) submitted by staff. Admin triage.
 export async function fetchFeedback() {
-  const snap = await getDocs(query(tenantCol('feedback'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('feedback'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 export async function updateFeedbackStatus(id, status) {
@@ -1058,7 +1058,7 @@ export async function kioskWalkinOptions({ serviceId, requestedTechName } = {}) 
 
 // ── HR: bonuses / performance reviews / payroll (read) ──
 export async function fetchBonuses() {
-  const snap = await getDocs(query(tenantCol('bonuses'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('bonuses'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
 }
 export async function createBonus(data) {
@@ -1067,7 +1067,7 @@ export async function createBonus(data) {
 }
 export async function deleteBonus(id) { await softDelete(doc(tenantCol('bonuses'), id)); }
 export async function fetchReviews() {
-  const snap = await getDocs(query(tenantCol('reviews'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('reviews'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
 }
 export async function saveReview(id, data) {
