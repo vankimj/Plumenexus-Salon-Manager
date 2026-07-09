@@ -1410,8 +1410,7 @@ export async function seedDemoWaitlist(onProgress, allClients) {
     d.setDate(d.getDate() - daysAgo);
     const date = d.toISOString().slice(0, 10);
     entries.push({
-      clientName:  c.name,
-      clientPhone: '',
+      clientName:  (c.name || '').trim().split(/\s+/)[0] || c.name,
       clientId:    c.id,
       serviceName: SVC_NAMES[Math.floor(Math.random() * SVC_NAMES.length)],
       techName:    TECHS[Math.floor(Math.random() * TECHS.length)],

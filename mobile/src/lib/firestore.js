@@ -1031,8 +1031,13 @@ export async function fetchWaitlist(date = todayKey()) {
     .sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || ''));
 }
 export async function addWaitlistEntry(data) {
+  // World-readable doc (public kiosk reads it unauthenticated) — never store
+  // contact PII. Strip phone/email, keep a first-name-only label + clientId;
+  // staff resolve full contact via clientId -> client doc.
+  const { clientPhone: _p, clientEmail: _e, clientName, ...rest } = data || {};
+  const displayName = (clientName || '').trim().split(/\s+/)[0] || '';
   const ref = await addDoc(tenantCol('waitlist'), {
-    ...data, date: todayKey(), addedAt: new Date().toISOString(), status: 'waiting',
+    ...rest, clientName: displayName, date: todayKey(), addedAt: new Date().toISOString(), status: 'waiting',
   });
   return ref.id;
 }

@@ -3325,7 +3325,13 @@ export async function fetchTenantTimezone() {
 }
 
 export async function addToWaitlist(data) {
-  return addDoc(WAITLIST_COL, { ...data, date: todayDateStr(), addedAt: new Date().toISOString(), status: 'waiting' });
+  // The waitlist doc is world-readable (public /?queue lobby reads it
+  // unauthenticated), so it must NEVER hold contact PII. Strip phone/email and
+  // keep a first-name-only display label + clientId; staff resolve full contact
+  // via clientId -> client doc. Single choke point so no caller can leak.
+  const { clientPhone: _p, clientEmail: _e, clientName, ...rest } = data || {};
+  const displayName = (clientName || '').trim().split(/\s+/)[0] || '';
+  return addDoc(WAITLIST_COL, { ...rest, clientName: displayName, date: todayDateStr(), addedAt: new Date().toISOString(), status: 'waiting' });
 }
 
 // Public lobby kiosk: phone-first client lookup + create, via a guarded Cloud
