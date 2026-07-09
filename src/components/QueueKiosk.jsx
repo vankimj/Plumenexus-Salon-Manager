@@ -29,7 +29,6 @@ function fmtPhoneInput(d) {
   if (d.length <= 6) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
-function fmtPhoneStored(d) { d = digitsOnly(d); return d.length === 10 ? `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d; }
 function waitLabel(min) {
   if (min == null) return '';
   if (min <= 5) return 'now';
@@ -191,7 +190,6 @@ export default function QueueKiosk() {
         locationId:  currentLocationId(),
         clientId:    identity?.clientId || '',
         clientName:  identity?.firstName || 'Guest',
-        clientPhone: fmtPhoneStored(phone),
         serviceName: svcSel?.name || '',
         serviceId:   svcSel?.id || '',
         removal:     removalNeeded,
@@ -219,7 +217,6 @@ export default function QueueKiosk() {
         locationId:  currentLocationId(),
         clientId:    res.clientId || '',
         clientName:  res.firstName || 'Guest',
-        clientPhone: fmtPhoneStored(arrPhone),
         apptId:      appt?.apptId || '',
         serviceName: appt?.serviceName || '',
         techName:    appt?.techName || 'Any',

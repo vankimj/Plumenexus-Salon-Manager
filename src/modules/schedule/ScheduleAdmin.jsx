@@ -1171,10 +1171,11 @@ function openNew(techName, slotMins) {
             // doesn't advance. _turnCredited rides on the appt so a later checkout
             // won't double-count the turn. Carry the queue entry's existing client
             // link + contact so the appt is prefilled (and saves without re-keying).
+            const qc = clients.find(c => c.id === entry.clientId) || {};
             setModal({
               appt: {
-                ...blankAppt(todayStr(), next.techName, nStart, entry.clientName, entry.serviceName,
-                  { clientId: entry.clientId, clientPhone: entry.clientPhone, clientEmail: entry.clientEmail }),
+                ...blankAppt(todayStr(), next.techName, nStart, qc.name || entry.clientName, entry.serviceName,
+                  { clientId: entry.clientId, clientPhone: qc.phone || '', clientEmail: qc.email || '' }),
                 _turnCredited: new Date().toISOString(),
               },
               original: null,
@@ -1196,8 +1197,9 @@ function openNew(techName, slotMins) {
             // doesn't pre-credit a turn — it's reconciled at checkout / Recount.
             // Carry the queue entry's existing client link + contact so the appt
             // is prefilled and saves without re-keying the customer.
-            setModal({ appt: blankAppt(todayStr(), sTech, sStart, entry.clientName, entry.serviceName,
-              { clientId: entry.clientId, clientPhone: entry.clientPhone, clientEmail: entry.clientEmail }), original: null, mode: 'edit', pendingSeat: { entryId: entry.id } });
+            const sc = clients.find(c => c.id === entry.clientId) || {};
+            setModal({ appt: blankAppt(todayStr(), sTech, sStart, sc.name || entry.clientName, entry.serviceName,
+              { clientId: entry.clientId, clientPhone: sc.phone || '', clientEmail: sc.email || '' }), original: null, mode: 'edit', pendingSeat: { entryId: entry.id } });
           }}
           onRemove={async entry => { await removeWaitlistEntry(entry.id).catch(() => {}); }}
           onDone={async entry => { await updateWaitlistEntry(entry.id, { status: 'done' }).catch(() => {}); }}

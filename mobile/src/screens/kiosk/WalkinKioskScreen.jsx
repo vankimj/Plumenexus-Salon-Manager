@@ -9,7 +9,7 @@ import {
 } from '../../lib/firestore';
 import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 import {
-  digitsOnly, fmtPhoneInput, fmtPhoneStored, waitLabel, availabilityView,
+  digitsOnly, fmtPhoneInput, waitLabel, availabilityView,
 } from '../../lib/kioskWalkin';
 
 // Reusable UI built once per (styles, theme) and memoized in the component so
@@ -144,8 +144,7 @@ export default function WalkinKioskScreen() {
       const reqTech = requestedTechName ? techs.find(t => t.name === requestedTechName) : null;
       await addWaitlistEntry({
         clientId: identity?.clientId || '',
-        clientName: identity?.fullName || identity?.firstName || 'Guest',
-        clientPhone: fmtPhoneStored(phone),
+        clientName: identity?.firstName || 'Guest',
         serviceId: svcSel?.id || '',
         serviceName: svcSel?.name || '',
         serviceIds: svcSel?.id ? [svcSel.id] : [],
@@ -173,7 +172,6 @@ export default function WalkinKioskScreen() {
       await addWaitlistEntry({
         clientId: res.clientId || '',
         clientName: res.firstName || 'Guest',
-        clientPhone: fmtPhoneStored(arrPhone),
         apptId: appt?.apptId || '',
         serviceName: appt?.serviceName || '',
         serviceNames: appt?.serviceName ? [appt.serviceName] : [],
