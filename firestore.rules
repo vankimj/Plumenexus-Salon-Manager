@@ -491,6 +491,15 @@ service cloud.firestore {
         match /private/{docId} {
           allow read, write: if isTenantAdmin(tenantId);
         }
+        // Contact PII (phone/address/city/state/zip/notes) moved OFF the
+        // publicly-readable parent doc into this staff-only sub-doc. The
+        // parent stays world-readable for the booking page (name/photo/
+        // socials/services); contact details are staff-read, writer-write.
+        // `email` intentionally stays on the parent (login/account join-key).
+        match /contact/{docId} {
+          allow read:  if isTenantStaff(tenantId);
+          allow write: if isTenantWriter(tenantId);
+        }
       }
 
       // Appointments.

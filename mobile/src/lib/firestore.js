@@ -227,10 +227,26 @@ export function bustRefCache(kind) {
   for (const k of _refCache.keys()) if (!kind || k.endsWith(`:${kind}`)) _refCache.delete(k);
 }
 
+// Contact PII (phone/address/city/state/zip/notes) lives in the staff-only
+// employees/{id}/contact/info sub-doc, NOT on the world-readable parent doc.
+// `email` stays on the parent (login/account join-key + where('email') query).
+const CONTACT_EMP_FIELDS = ['phone', 'address', 'city', 'state', 'zip', 'notes'];
+const empContactRef = (id) => doc(tenantCol('employees'), id, 'contact', 'info');
+
 export async function fetchEmployees() {
   return cachedRef('employees', async () => {
     const snap = await getDocs(query(tenantCol('employees'), orderBy('sortOrder')));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Staff app — merge the contact sub-doc so the directory / edit form still
+    // show phone etc. Guarded so a non-staff signed-in edge case degrades to
+    // the public slice rather than throwing.
+    if (auth?.currentUser) {
+      await Promise.all(list.map(async emp => {
+        try { const c = await getDoc(empContactRef(emp.id)); if (c.exists()) Object.assign(emp, c.data()); }
+        catch (_) { /* not staff — leave contact absent */ }
+      }));
+    }
+    return list;
   });
 }
 
@@ -241,9 +257,21 @@ export async function fetchEmployees() {
 // update their OWN doc (matched by email) for the editable fields,
 // which keeps comp data in employees/{id}/private/comp (admin-only).
 export async function saveEmployee(id, data) {
-  await setDoc(doc(tenantCol('employees'), id),
-    { ...data, updatedAt: new Date().toISOString() },
-    { merge: true });
+  // Split contact PII into the staff-only sub-doc and purge it from the
+  // world-readable parent. Batched so both land together (no re-leak window).
+  const publicFields = { ...data };
+  const contactFields = {};
+  const purge = {};
+  for (const k of CONTACT_EMP_FIELDS) {
+    if (k in publicFields) { contactFields[k] = publicFields[k]; delete publicFields[k]; purge[k] = deleteField(); }
+  }
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.set(doc(tenantCol('employees'), id), { ...purge, ...publicFields, updatedAt: now }, { merge: true });
+  if (Object.keys(contactFields).length) {
+    batch.set(empContactRef(id), { ...contactFields, updatedAt: now }, { merge: true });
+  }
+  await batch.commit();
   bustRefCache('employees');
 }
 
@@ -963,9 +991,16 @@ export async function updateFeedbackStatus(id, status) {
 // writeBatch split on web (data-integrity). Mobile intentionally edits
 // only the public doc (name/contact/social/active) — never comp.
 export async function createEmployee(data) {
-  const ref = await addDoc(tenantCol('employees'), {
-    ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  });
+  const publicFields = { ...data };
+  const contactFields = {};
+  for (const k of CONTACT_EMP_FIELDS) {
+    if (k in publicFields) { contactFields[k] = publicFields[k]; delete publicFields[k]; }
+  }
+  const now = new Date().toISOString();
+  const ref = await addDoc(tenantCol('employees'), { ...publicFields, createdAt: now, updatedAt: now });
+  if (Object.keys(contactFields).length) {
+    await setDoc(empContactRef(ref.id), { ...contactFields, createdAt: now, updatedAt: now }, { merge: true });
+  }
   bustRefCache('employees');
   return ref.id;
 }

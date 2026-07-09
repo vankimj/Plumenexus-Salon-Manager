@@ -3820,6 +3820,29 @@ exports.emailEmployeeInvite = onCall({ cors: true }, async (request) => {
 //     from the admin-minted invite (never from the client) against a whitelist.
 //   • Stored role uses the legacy vocabulary the projections key on
 //     (admin/manager/scheduler/tech/readonly) — see src/lib/userProjections.js.
+// Employee contact PII (phone/address/city/state/zip/notes) lives in the
+// staff-only sub-doc employees/{id}/contact/info — the parent employee doc is
+// PUBLICLY readable (booking page), so contact PII must never sit on it.
+// Admin-SDK code paths that need those fields merge the sub-doc explicitly.
+// (`email` stays on the parent: it is the auth/login join-key + a
+// where('email') query target, so it is NOT moved.)
+async function loadEmpContact(db, tenantId, id) {
+  try {
+    // Read the staff-only contact subdoc AND the parent, and fall back to the
+    // legacy parent fields per-key. This keeps every reader correct BOTH before
+    // and after the PII migration (deploy order becomes irrelevant, and no tech
+    // ever loses a phone in the deploy->migrate window). Subdoc wins.
+    const [pSnap, sSnap] = await Promise.all([
+      db.doc(`tenants/${tenantId}/employees/${id}`).get(),
+      db.doc(`tenants/${tenantId}/employees/${id}/contact/info`).get(),
+    ]);
+    const p = pSnap.exists ? (pSnap.data() || {}) : {};
+    const c = sSnap.exists ? (sSnap.data() || {}) : {};
+    const pick = (k) => (c[k] != null ? c[k] : (p[k] != null ? p[k] : null));
+    return { phone: pick('phone'), address: pick('address'), city: pick('city'), state: pick('state'), zip: pick('zip'), notes: pick('notes') };
+  } catch (_) { return {}; }
+}
+
 const STAFF_INVITE_ROLES = {
   tech:      { store: 'tech',      label: 'a nail tech' },
   scheduler: { store: 'scheduler', label: 'front desk (scheduler)' },
@@ -3860,13 +3883,14 @@ exports.createStaffInvite = onCall({ cors: true }, async (request) => {
   const empRef = db.collection(`tenants/${tenantId}/employees`).doc();
   await empRef.set({
     name: name || 'New team member',
-    phone,
     role: roleDef.store,
     active: true,
     pendingInvite: true,
     createdAt: nowIso,
     updatedAt: nowIso,
   });
+  // Phone is contact PII — keep it OFF the publicly-readable parent doc.
+  if (phone) await empRef.collection('contact').doc('info').set({ phone, updatedAt: nowIso }, { merge: true });
 
   await db.doc(`staffInvites/${token}`).set({
     tenantId,
@@ -4140,6 +4164,7 @@ exports.clockEvent = onCall({ cors: true }, async (request) => {
   const empSnap = await empRef.get();
   if (!empSnap.exists) throw new HttpsError('not-found', 'Employee not found');
   const emp = empSnap.data() || {};
+  Object.assign(emp, await loadEmpContact(db, tenantId, employeeId));
   if (emp.active === false) {
     throw new HttpsError('failed-precondition', 'Employee is inactive');
   }
@@ -5901,12 +5926,12 @@ exports.timeclockBreakReminders = onSchedule(
           newEntries.push(entry);
           continue;
         }
-        // Look up the tech's phone — entries store name only, not phone.
+        // Look up the tech's phone — entries store name only, not phone. Phone
+        // now lives in the staff-only contact subdoc (moved off the world-
+        // readable employee doc), so resolve via loadEmpContact.
         let phone = null;
-        try {
-          const eSnap = await db.doc(`tenants/${tenantId}/employees/${entry.employeeId}`).get();
-          phone = eSnap.exists ? (eSnap.data().phone || null) : null;
-        } catch (_) { /* fall through */ }
+        try { phone = (await loadEmpContact(db, tenantId, entry.employeeId)).phone || null; }
+        catch (_) { /* fall through */ }
         if (phone) {
           await sendSms({
             to:    phone,
@@ -6228,7 +6253,7 @@ exports.sendTechAppointmentReminders = onSchedule(
 
       const empSnap = await db.collection(`tenants/${tenantId}/employees`).get();
       const empByName = {};
-      empSnap.docs.forEach(d => { const e = d.data(); if (e.name) empByName[e.name] = e; });
+      await Promise.all(empSnap.docs.map(async d => { const e = { id: d.id, ...d.data() }; if (!e.name) return; Object.assign(e, await loadEmpContact(db, tenantId, d.id)); empByName[e.name] = e; }));
 
       const toSnap = await db.collection(`tenants/${tenantId}/timeOff`).get();
       const timeOffEntries = toSnap.docs.map(d => d.data())
@@ -6716,7 +6741,7 @@ exports.generateAnnual1099s = onSchedule(
     // Fetch employees for contact/tax info
     const empSnaps = await db.collection(`tenants/${TENANT_ID}/employees`).get();
     const empMap = {};
-    empSnaps.docs.forEach(d => { empMap[d.data().name] = d.data(); });
+    await Promise.all(empSnaps.docs.map(async d => { const e = { id: d.id, ...d.data() }; Object.assign(e, await loadEmpContact(db, TENANT_ID, d.id)); if (e.name) empMap[e.name] = e; }));
 
     // Fetch settings for payer info. Defaults to the tenant doc's name +
     // empty address if settings.salon* fields aren't set; if both are
@@ -8933,7 +8958,7 @@ async function notifyByRouting(db, tenantId, event, { title, line, data = {} }) 
   if (smsSet.size) {
     try {
       const emps = await db.collection(`tenants/${tenantId}/employees`).get();
-      emps.docs.forEach(d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (em && e.phone) phoneByEmail[em] = e.phone; });
+      await Promise.all(emps.docs.map(async d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (!em) return; const c = await loadEmpContact(db, tenantId, d.id); const ph = e.phone || c.phone; if (ph) phoneByEmail[em] = ph; }));
     } catch (e) { /* best-effort */ }
   }
   let alertSubject = '', alertHtml = '', fromAddr = null;
@@ -8979,7 +9004,7 @@ async function notifyTenantAdmins(db, tenantId, { title, line, data = {}, event 
   const phoneByEmail = {};
   try {
     const emps = await db.collection(`tenants/${tenantId}/employees`).get();
-    emps.docs.forEach(d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (em && e.phone) phoneByEmail[em] = e.phone; });
+    await Promise.all(emps.docs.map(async d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (!em) return; const c = await loadEmpContact(db, tenantId, d.id); const ph = e.phone || c.phone; if (ph) phoneByEmail[em] = ph; }));
   } catch (e) { /* best-effort */ }
 
   const { subject: alertSubject, html: alertHtml } = await renderTemplate(db, tenantId, 'admin_alert', {
@@ -18517,7 +18542,12 @@ async function executeTool(db, tenantId, callerEmail, sessionId, toolName, input
         patch[k] = String(input[k]).slice(0, k === 'notes' ? 1000 : 200);
       }
       if (Object.keys(patch).length === 0) return { ok: false, error: 'No allow-listed employee field supplied.' };
+      // phone/notes are contact PII — route them to the staff-only contact
+      // sub-doc, never the publicly-readable parent employee doc.
+      const aiContact = {};
+      for (const k of ['phone', 'notes']) if (k in patch) { aiContact[k] = patch[k]; delete patch[k]; }
       patch.updatedAt = new Date().toISOString();
+      if (Object.keys(aiContact).length) await ref.collection('contact').doc('info').set({ ...aiContact, updatedAt: patch.updatedAt }, { merge: true });
       await ref.set(patch, { merge: true });
       const beforeSlice = Object.fromEntries(Object.keys(patch).filter(k => k !== 'updatedAt').map(k => [k, before[k] ?? null]));
       await writeAiAuditLog(db, tenantId, { ...audit, result: 'ok', before: beforeSlice, after: patch });
