@@ -6,7 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { auth } from '../lib/firebase';
+import { auth, callFn } from '../lib/firebase';
 import { saveEmployee, fetchTimeOff, createTimeOff, deleteTimeOff, fetchContinuingEducation, saveCE, deleteCE } from '../lib/firestore';
 import { CE_CATEGORIES } from '../lib/ceIdeas';
 import ConflictTextsModal from '../components/ConflictTextsModal';
@@ -122,6 +122,40 @@ export default function ProfileScreen({ navigation }) {
     try { await clearPushTokenForUser(user?.uid); } catch {}
     try { await clearCurrentTenant(); } catch {}
     await auth.signOut();
+  }
+
+  // App Store Guideline 5.1.1(v): apps that support account creation must
+  // offer in-app account deletion. Server-side deleteMyAccount removes the
+  // caller's staff access from every tenant + deletes the Firebase Auth user
+  // (server-side delete avoids the requires-recent-login reauth dance).
+  // Business records (appointments, receipts) belong to the salon and are
+  // retained per its policies — the dialog says so explicitly.
+  function handleDeleteAccount() {
+    Alert.alert(
+      'Delete account?',
+      'This permanently deletes your Plume Nexus sign-in and removes your access to every salon. ' +
+      'Business records kept by your salon (appointments, receipts, payroll) are retained per its policies. ' +
+      'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete my account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              try { await clearPushTokenForUser(user?.uid); } catch {}
+              await callFn('deleteMyAccount')({});
+              try { await clearCurrentTenant(); } catch {}
+              // Auth user is gone server-side; drop the local session.
+              await auth.signOut().catch(() => {});
+            } catch (e) {
+              const msg = e?.message || 'Could not delete your account.';
+              Alert.alert('Account deletion failed', msg);
+            }
+          },
+        },
+      ],
+    );
   }
 
   // Pick + upload a profile photo. Resized to 400x400 JPEG ~80% quality
@@ -609,6 +643,10 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity style={styles.deleteAccountBtn} onPress={handleDeleteAccount}>
+          <Text style={styles.deleteAccountText}>Delete account</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <ConflictTextsModal entry={conflictEntry} onClose={() => setConflictEntry(null)} />
@@ -1004,4 +1042,6 @@ const makeStyles = (t) => StyleSheet.create({
 
   signOutBtn:  { marginTop: 20, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 30, borderRadius: 22, backgroundColor: t.dangerBg, borderWidth: 1, borderColor: t.danger },
   signOutText: { color: t.danger, fontSize: 14, fontWeight: '600' },
+  deleteAccountBtn:  { marginTop: 14, marginBottom: 8, alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20 },
+  deleteAccountText: { color: t.textMuted, fontSize: 12, fontWeight: '500', textDecorationLine: 'underline' },
 });

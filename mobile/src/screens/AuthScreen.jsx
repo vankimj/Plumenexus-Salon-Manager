@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInAnonymously } from 'firebase/auth';
+import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
 import Constants from 'expo-constants';
 import Svg, { Path } from 'react-native-svg';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
@@ -59,10 +59,29 @@ export default function AuthScreen() {
   // on iOS 13+ builds that include expo-apple-authentication). Keeps this safe to
   // ship to a build that predates the native rebuild — the button just hides.
   const [appleAvailable, setAppleAvailable] = useState(false);
+  // Email/password path — staff whose salon provisioned a password login
+  // (no Google/Apple account needed) and App Review demo credentials.
+  const [showEmail, setShowEmail] = useState(false);
+  const [email,     setEmail]     = useState('');
+  const [password,  setPassword]  = useState('');
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
   const styles = useThemedStyles(makeStyles);
+
+  async function handleEmailSignIn() {
+    const em = email.trim().toLowerCase();
+    if (!em || !password) { Alert.alert('Sign in', 'Enter your email and password.'); return; }
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, em, password);
+    } catch (err) {
+      // One generic message — never confirm whether the account exists.
+      Alert.alert('Sign-in failed', 'Incorrect email or password.');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleGoogleSignIn() {
     if (isExpoGo) {
@@ -154,6 +173,51 @@ export default function AuthScreen() {
           />
         )}
 
+        {/* Email/password — for staff whose salon set up a password login
+            (no Google or Apple account required). Also the typed-credential
+            path App Review uses with the demo account. */}
+        {!showEmail ? (
+          <TouchableOpacity style={styles.emailLink} onPress={() => setShowEmail(true)} disabled={loading}>
+            <Text style={styles.emailLinkText}>Sign in with email</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.emailForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor={styles._muted.color}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="username"
+              autoComplete="email"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor={styles._muted.color}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              textContentType="password"
+              autoComplete="password"
+              onSubmitEditing={handleEmailSignIn}
+            />
+            <TouchableOpacity
+              style={[styles.emailBtn, loading && { opacity: 0.6 }]}
+              onPress={handleEmailSignIn}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.emailBtnText}>Sign in</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Dev-only escape hatch for testing UI inside Expo Go where
             the native Google SDK isn't available. Remove before App Store. */}
         {isExpoGo && (
@@ -191,6 +255,15 @@ const makeStyles = (t) => StyleSheet.create({
   googleBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dadce0', borderRadius: 12, paddingVertical: 13 },
   googleBtnText: { color: '#3c4043', fontSize: 15, fontWeight: '600' },
   appleBtn:  { width: '100%', height: 48, marginTop: 12 },
+  emailLink: { paddingVertical: 14, alignItems: 'center' },
+  emailLinkText: { color: t.textMuted, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  emailForm: { width: '100%', marginTop: 14, gap: 10 },
+  input:     { width: '100%', borderWidth: 1, borderColor: t.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, fontSize: 15, color: t.text, backgroundColor: t.surface },
+  emailBtn:  { width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: t.teal, borderRadius: 12, paddingVertical: 13 },
+  emailBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  // Placeholder color needs a resolved value, not a style — stashed here so
+  // the component can read it via styles._muted.color.
+  _muted:    { color: t.placeholder },
   devBtn:    { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 14, borderRadius: 12, borderWidth: 1, borderColor: t.border, borderStyle: 'dashed' },
   devBtnText:{ color: t.textMuted, fontSize: 12, fontWeight: '500', letterSpacing: 0.4 },
 });
