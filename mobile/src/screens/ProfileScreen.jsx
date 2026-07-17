@@ -13,6 +13,7 @@ import ConflictTextsModal from '../components/ConflictTextsModal';
 import { clearPushTokenForUser } from '../hooks/usePushRegistration';
 import { clearCurrentTenant } from '../lib/currentTenant';
 import { getPrefs, setTheme, setAutoLogoutMin, subscribePrefs } from '../lib/userPrefs';
+import { BUILD_LABEL } from '../lib/version';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
 import useMyTenants from '../hooks/useMyTenants';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
@@ -647,6 +648,10 @@ export default function ProfileScreen({ navigation }) {
         <TouchableOpacity style={styles.deleteAccountBtn} onPress={handleDeleteAccount}>
           <Text style={styles.deleteAccountText}>Delete account</Text>
         </TouchableOpacity>
+
+        {/* Build label (moved out of every screen header) — support asks
+            "what version are you on?" and the answer lives here. */}
+        <Text style={styles.buildLabel}>{BUILD_LABEL}</Text>
       </ScrollView>
 
       <ConflictTextsModal entry={conflictEntry} onClose={() => setConflictEntry(null)} />
@@ -1044,4 +1049,5 @@ const makeStyles = (t) => StyleSheet.create({
   signOutText: { color: t.danger, fontSize: 14, fontWeight: '600' },
   deleteAccountBtn:  { marginTop: 14, marginBottom: 8, alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 20 },
   deleteAccountText: { color: t.textMuted, fontSize: 12, fontWeight: '500', textDecorationLine: 'underline' },
+  buildLabel: { textAlign: 'center', fontSize: 10, color: t.textFaint || t.textMuted, marginTop: 16, marginBottom: 6 },
 });
