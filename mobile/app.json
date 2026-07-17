@@ -20,7 +20,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.plumenexus.pro",
+      "bundleIdentifier": "com.plumenexus.salon",
       "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

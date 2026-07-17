@@ -1,8 +1,10 @@
-# App Store Listing Package — Plume Nexus Salons v1.0.0
+# App Store Listing Package — Plume Nexus Salon Manager v1.0.0
 
-Everything paste-ready for [App Store Connect](https://appstoreconnect.apple.com) (app 6777297979).
-Prepared 2026-06-18 on `feat/appstore-v1-submission`. Submitting under **JVK Consulting LLC**
-(transfer to Plume Nexus LLC post-launch via App Transfer — board #428).
+Everything paste-ready for [App Store Connect](https://appstoreconnect.apple.com).
+Prepared 2026-06-18; **updated 2026-07-16: submitting under the approved Plume Nexus LLC
+account** (Team `WX8JJUUYSR`, bundle `com.plumenexus.salon`) — no JVK transfer needed
+since v1 was never submitted. Old JVK record/bundle (`app.plumenexus.pro`, ASC 6777297979)
+will be retired.
 
 ---
 
@@ -10,7 +12,7 @@ Prepared 2026-06-18 on `feat/appstore-v1-submission`. Submitting under **JVK Con
 
 | Field | Value |
 |---|---|
-| **Name** | `Plume Nexus Salons` (plain "Plume Nexus" is taken) |
+| **Name** | `Plume Nexus Salon Manager` (25/30 chars; matches product branding; avoids the JVK record's "Plume Nexus Salons" name collision) |
 | **Subtitle** (≤30) | `Run your salon from your phone` |
 | **Primary category** | Business |
 | **Secondary category** | Productivity |
@@ -31,13 +33,14 @@ earnings, and client management — synced live with your front desk.
 ## 3. Keywords (≤100 chars — 85 used)
 
 ```
-salon,nail,scheduling,booking,POS,walk-in,stylist,barber,spa,payroll,tips,appointment
+nail,scheduling,booking,POS,walk-in,stylist,barber,spa,payroll,tips,appointment,beauty
 ```
+("salon" and "manager" removed — words already in the app name are ignored in keywords; "beauty" added with the freed chars.)
 
 ## 4. Description
 
 ```
-Plume Nexus Salons is the staff app for salons that run on Plume Nexus — the
+Plume Nexus Salon Manager is the staff app for salons that run on Plume Nexus — the
 all-in-one salon management platform. Your schedule, clients, checkout, and
 earnings, live on your phone and always in sync with the front desk.
 
@@ -70,8 +73,8 @@ Learn more at plumenexus.com.
 ## 5. What's New (v1.0.0)
 
 ```
-Welcome to Plume Nexus Salons — scheduling, walk-in rotation, checkout,
-earnings, and client management for salon teams.
+Welcome to Plume Nexus Salon Manager — scheduling, walk-in rotation,
+checkout, earnings, and client management for salon teams.
 ```
 
 ## 6. App Review Information
@@ -149,10 +152,16 @@ Two capture paths:
 Suggested 6 screens (log into Demo Studio): ① Schedule day view ② Walk-in turn rotation ③ Checkout ④ Earnings ⑤ Client profile ⑥ Manage grid.
 Upload at [ASC → App Store tab → iOS Previews and Screenshots](https://appstoreconnect.apple.com).
 
-## 9. Remaining click-path (in order)
+## 9. Remaining click-path (in order — 2026-07-16, Plume Nexus account)
 
-1. **Review + merge [PR #512](https://github.com/vankimj/Plumenexus-Salon-Manager/pull/512)**, then deploy the account-deletion CF (required before Apple reviews):
-   `firebase deploy --project plumenexus-prod --only functions:deleteMyAccount`
-2. **Upload build #21 to TestFlight:** `cd mobile && npx eas-cli submit -p ios --latest`
-3. In [App Store Connect](https://appstoreconnect.apple.com): create version 1.0.0 → paste sections 1–6 above → complete App Privacy (section 7) → upload screenshots (section 8) → select build 21 → answer export compliance (already declared exempt via `ITSAppUsesNonExemptEncryption`) → **Submit for Review**.
-4. Review typically returns in ~24–48h. If rejected, the notes in section 6 address the most likely questions (B2B login, Bluetooth, payments).
+Already done: ASC API key wired (`~/.config/plumenexus/AuthKey_YN5UHUC8BW.p8`, Key `YN5UHUC8BW`, Issuer `f9d5e228-891d-49bc-b05c-b9065d712f3c`), bundle `com.plumenexus.salon` registered (Team `WX8JJUUYSR`), push capability enabled, Firebase iOS app `1:563347750501:ios:77934f7af148df0e3c908c` registered. `deleteMyAccount` CF deployed + E2E-verified. SIWA capability syncs automatically at first EAS build.
+
+1. **Human — ASC app record** (API can't create apps): [My Apps → New App](https://appstoreconnect.apple.com/apps) → iOS, name `Plume Nexus Salon Manager`, bundle `com.plumenexus.salon`, SKU `plumenexus-salon-1`. Note the record's **Apple ID** (App Information) → goes into `eas.json` `ascAppId`.
+2. **Human — Google OAuth iOS client**: [GCP Console → Credentials](https://console.cloud.google.com/apis/credentials?project=plumenexus-prod) → Create credentials → OAuth client ID → iOS → bundle `com.plumenexus.salon`. Paste the client ID back → update `IOS_CLIENT_ID` in [AuthScreen.jsx](src/screens/AuthScreen.jsx) + the reversed-ID URL scheme in [app.json](app.json).
+3. **Human — confirm** [Agreements](https://appstoreconnect.apple.com/agreements): Free Apps = Active.
+4. **Build under the new team** (new dist cert + APNs auto-created via the ASC key):
+   `EXPO_APPLE_TEAM_ID=WX8JJUUYSR EXPO_APPLE_TEAM_TYPE=COMPANY_OR_ORGANIZATION EXPO_ASC_API_KEY_PATH=~/.config/plumenexus/AuthKey_YN5UHUC8BW.p8 EXPO_ASC_KEY_ID=YN5UHUC8BW EXPO_ASC_ISSUER_ID=f9d5e228-891d-49bc-b05c-b9065d712f3c npx eas-cli build -p ios --profile production --non-interactive`
+   (build #21 is JVK-signed — a fresh build is required)
+5. **Submit to TestFlight** with the same env vars: `npx eas-cli submit -p ios --latest`
+6. ASC: version 1.0.0 → paste §1–6 → App Privacy (§7) → screenshots (§8) → attach the new build → Submit for Review (~24–48h).
+7. Post-approval cleanup: delete the old JVK app record + (later) re-request Tap to Pay under Plume Nexus.
