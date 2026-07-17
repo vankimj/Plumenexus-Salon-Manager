@@ -3,6 +3,7 @@ import {
   strToMins,
   techCanDo, techsForService, techsForServices,
   cartTotalDuration, isTechFreeAt, firstFreeTech, getSlots,
+  bookableWindow, apptDurationMins,
   BOOKING_START, BOOKING_END, SLOT_STEP,
 } from './booking';
 
@@ -217,5 +218,91 @@ describe('getSlots', () => {
   });
   it('produces fewer slots for longer durations', () => {
     expect(getSlots(120).length).toBeLessThan(getSlots(30).length);
+  });
+
+  it('honors an explicit window — starts at window.open, last slot fits window.close', () => {
+    const win = { open: strToMins('10:00'), close: strToMins('18:00') };
+    const slots = getSlots(60, win);
+    expect(slots[0]).toBe(win.open);
+    expect(slots[slots.length - 1] + 60).toBeLessThanOrEqual(win.close);
+    // No slot may start before the window opens or end after it closes.
+    expect(slots.every(s => s >= win.open && s + 60 <= win.close)).toBe(true);
+  });
+
+  it('a tighter window yields fewer slots than the 9am–8pm default', () => {
+    const tight = getSlots(60, { open: strToMins('10:00'), close: strToMins('16:00') });
+    expect(tight.length).toBeLessThan(getSlots(60).length);
+  });
+
+  it('falls back to the 9am–8pm default for a missing/partial window', () => {
+    expect(getSlots(60, undefined)).toEqual(getSlots(60));
+    expect(getSlots(60, {})).toEqual(getSlots(60));
+    // Partial window: only close provided → open falls back to BOOKING_START.
+    expect(getSlots(60, { close: strToMins('18:00') })[0]).toBe(BOOKING_START);
+  });
+
+  it('composes with bookableWindow to cap slots at the real close time', () => {
+    // Store + appt hours both close at 18:00 → no slot may run past 6pm.
+    const settings = { storeHours: { Wed: { open: '09:00', close: '18:00' } }, apptHours: { open: '09:00', close: '18:00' } };
+    const win = bookableWindow(settings, 'Wed');
+    const slots = getSlots(60, win);
+    expect(slots.every(s => s + 60 <= strToMins('18:00'))).toBe(true);
+    expect(getSlots(60).some(s => s + 60 > strToMins('18:00'))).toBe(true); // default would overrun
+  });
+});
+
+// ── apptDurationMins ───────────────────────────────────
+describe('apptDurationMins', () => {
+  it('sums service durations', () => {
+    expect(apptDurationMins({ services: [{ duration: 30 }, { duration: 45 }] })).toBe(75);
+  });
+  it('falls back to an explicit duration when no services have a duration', () => {
+    expect(apptDurationMins({ services: [], duration: 90 })).toBe(90);
+  });
+  it('defaults to 60 when nothing is known', () => {
+    expect(apptDurationMins({})).toBe(60);
+    expect(apptDurationMins(null)).toBe(60);
+  });
+  it('ignores non-numeric service durations', () => {
+    expect(apptDurationMins({ services: [{ duration: 'x' }, { duration: 20 }] })).toBe(20);
+  });
+});
+
+// ── bookableWindow ─────────────────────────────────────
+describe('bookableWindow', () => {
+  it('defaults to a 9am–8pm window with no settings', () => {
+    const w = bookableWindow(undefined, 'Mon');
+    expect(w.open).toBe(strToMins('09:00'));
+    expect(w.close).toBe(strToMins('20:00'));
+    expect(w.closed).toBe(false);
+  });
+
+  it('widens to whichever of store-close / appt-close is later', () => {
+    // Store closes 18:00 but appointment hours run to 20:00 → window closes 20:00.
+    const settings = { storeHours: { Tue: { open: '10:00', close: '18:00' } }, apptHours: { open: '09:00', close: '20:00' } };
+    const w = bookableWindow(settings, 'Tue');
+    expect(w.close).toBe(strToMins('20:00'));
+    expect(w.open).toBe(strToMins('09:00')); // earliest of the two opens
+  });
+
+  it('uses the store close when it extends past appointment hours', () => {
+    const settings = { storeHours: { Fri: { open: '09:00', close: '21:00' } }, apptHours: { open: '09:00', close: '20:00' } };
+    expect(bookableWindow(settings, 'Fri').close).toBe(strToMins('21:00'));
+  });
+
+  it('on a closed day only the appointment-hours window applies', () => {
+    const settings = { storeHours: { Sun: { closed: true, open: '10:00', close: '16:00' } }, apptHours: { open: '11:00', close: '15:00' } };
+    const w = bookableWindow(settings, 'Sun');
+    expect(w.closed).toBe(true);
+    expect(w.open).toBe(strToMins('11:00'));
+    expect(w.close).toBe(strToMins('15:00'));
+  });
+
+  it('an appointment ending exactly at close fits; one minute past does not', () => {
+    const settings = { storeHours: { Wed: { open: '09:00', close: '18:00' } }, apptHours: { open: '09:00', close: '20:00' } };
+    const win = bookableWindow(settings, 'Wed'); // closes 20:00 = 1200
+    const start = strToMins('19:00');            // 1140
+    expect(start + apptDurationMins({ duration: 60 })).toBeLessThanOrEqual(win.close);  // 1200 == 1200, fits
+    expect(start + apptDurationMins({ duration: 61 })).toBeGreaterThan(win.close);      // 1201 > 1200, blocked
   });
 });

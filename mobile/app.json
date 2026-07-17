@@ -19,15 +19,18 @@
       "iosDisplayInForeground": true
     },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "app.plumenexus.pro",
+      "supportsTablet": false,
+      "bundleIdentifier": "com.plumenexus.salon",
       "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Plume Nexus uses the camera to take profile photos for staff and photos for your salon's tip-screen display.",
+        "NSPhotoLibraryUsageDescription": "Plume Nexus uses your photo library to choose staff profile photos, tip-screen display images, and photos documenting a refunded service.",
+        "NSMicrophoneUsageDescription": "Plume Nexus does not record audio. This permission is only requested by the audio component used to play the walk-in arrival chime.",
         "CFBundleURLTypes": [
           {
             "CFBundleURLSchemes": [
-              "com.googleusercontent.apps.563347750501-n1pe3i700s6fh75cpu1sspjjd63n04oa"
+              "com.googleusercontent.apps.563347750501-7pk04kolq41bgbfkhjo8c5dkmu233p1n"
             ]
           }
         ]

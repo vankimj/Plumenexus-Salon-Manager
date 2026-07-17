@@ -16,3 +16,4 @@ GoogleService-Info.plist
 
 # Dependencies
 node_modules/
+credentials.json

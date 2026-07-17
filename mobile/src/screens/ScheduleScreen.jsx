@@ -10,7 +10,7 @@ import {
   softDeleteRecurringSeries, fetchSettings, fetchAttendance, notifyAppointmentCancelled,
   createTimeOff, deleteTimeOff,
 } from '../lib/firestore';
-import { isSalonOpenNow, clockedInNameSet, attendanceKey } from '../lib/shiftGate';
+import { isSalonOpenNow, clockedInNameSet, attendanceKey, bookableWindow } from '../lib/shiftGate';
 import { notifyAffectedTechs } from '../lib/notifications';
 import { addApptToTab, removeApptFromTab, getCurrentTab, tabCount, tabTotal, subscribeTab, clearTab } from '../lib/currentTab';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
@@ -937,7 +937,9 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
   // Column width adapts to how many techs are shown so filtering down (via the
   // chips above) fills the screen — 1–2 techs span the full width so gaps read
   // clearly; more techs fall back to a fixed width and scroll horizontally.
-  const AXIS_W = 52;
+  // 64pt fits "10:00 AM"/"12:00 PM" at fontSize 11 — 52 clipped the leading
+  // digit off the left screen edge (labels are right-anchored in the axis).
+  const AXIS_W = 64;
   const avail  = Math.max(0, screenW - AXIS_W);
   const fit    = techs.length > 0 ? Math.floor(avail / techs.length) : GRID_COL_W;
   const colW   = fit >= 132 ? Math.min(fit, 240) : GRID_COL_W;
@@ -974,7 +976,7 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
     >
       <View style={{ flexDirection: 'row' }}>
         {/* Fixed time axis */}
-        <View style={{ width: 52 }}>
+        <View style={{ width: AXIS_W }}>
           <View style={{ height: GRID_HEADER_H }} />
           <View style={{ height: GRID_H }}>
             {Array.from({ length: SLOT_COUNT }).map((_, idx) => {
@@ -1496,6 +1498,19 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated })
       if (!validTime(startStr)) {
         Alert.alert('Start time not valid', 'Use 24-hour HH:MM format (e.g. 14:30).');
         return;
+      }
+      // The appointment must fit inside the day's bookable window (store hours
+      // widened by appointment hours) — parity with web ScheduleAdmin's hard
+      // block. Skip only while settings are still loading.
+      if (settings) {
+        const dow = new Date(prefill.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        const win = bookableWindow(settings, dow);
+        const endMin = hhmmToMin(startStr) + totalDuration;
+        if (endMin > win.close) {
+          const fmt = (m) => { const h = Math.floor(m / 60), mm = m % 60, ap = h >= 12 ? 'PM' : 'AM', hh = h > 12 ? h - 12 : h === 0 ? 12 : h; return `${hh}:${String(mm).padStart(2, '0')} ${ap}`; };
+          Alert.alert('Past bookable hours', `This ${totalDuration}-minute appointment would end at ${fmt(endMin)}, after the latest bookable time (${fmt(win.close)}). Shorten it or start earlier.`);
+          return;
+        }
       }
     }
     if (gateBlocked && gateBlocked()) return;

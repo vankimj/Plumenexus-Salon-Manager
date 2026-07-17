@@ -3774,8 +3774,11 @@ exports.emailEmployeeInvite = onCall({ cors: true }, async (request) => {
   const tenSnap = await db.doc(`tenants/${tenantId}`).get();
   const salonName = tenSnap.exists ? (tenSnap.data().name || 'Your salon') : 'Your salon';
   // Sign-in URL on the tenant's branded SaaS subdomain (cached lookup of
-  // tenants/{tenantId}.subdomain).
-  const signInUrl = await tenantBaseUrl(db, tenantId);
+  // tenants/{tenantId}.subdomain). MUST land on the staff app at /manage —
+  // the bare base URL is the PUBLIC client homepage (booking/marketing), which
+  // has no staff Google sign-in, so an invitee just landed on the storefront.
+  const base = (await tenantBaseUrl(db, tenantId)).replace(/\/+$/, '');
+  const signInUrl = `${base}/manage`;
 
   const apiKey = awsAccessKey.value();
   if (!apiKey) throw new HttpsError('unavailable', 'Email is not configured');
@@ -3997,6 +4000,76 @@ exports.claimStaffInvite = onCall({ cors: true }, async (request) => {
   const tenSnap = await db.doc(`tenants/${result.tenantId}`).get();
   const t = tenSnap.exists ? tenSnap.data() : {};
   return { ok: true, tenantId: result.tenantId, role: result.role, salonName: t.name || 'your salon', subdomain: t.subdomain || result.tenantId };
+});
+
+// App Store Guideline 5.1.1(v) — in-app account deletion. Deletes the CALLER's
+// sign-in: removes their membership from every tenant (usersFull + reprojected
+// allow-lists move together in one transaction per tenant — the 2026-05-10
+// split-write incident rule), deletes their push-token docs, records a
+// platform audit row, then deletes the Firebase Auth user SERVER-side (a
+// client-side deleteUser() would hit requires-recent-login). Tenant business
+// records (appointments, receipts, payroll) are the salon's records and are
+// NOT touched — the confirm dialog says so.
+// Guard: a tenant OWNER can't self-delete while still owner — that would
+// orphan the tenant. Transfer ownership (or contact support) first.
+exports.deleteMyAccount = onCall({ cors: true, timeoutSeconds: 60 }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid   = request.auth.uid;
+  const email = (request.auth.token.email || '').toLowerCase();
+  const db = getFirestore();
+
+  // Pass 1 (read-only): owner guard across every tenant BEFORE any mutation,
+  // so a blocked deletion is a clean no-op.
+  const tenantsSnap = await db.collection('tenants').get();
+  for (const t of tenantsSnap.docs) {
+    const td = t.data() || {};
+    if (email && (td.ownerEmail || '').toLowerCase() === email) {
+      throw new HttpsError('failed-precondition',
+        `You are the owner of "${td.name || t.id}". Transfer ownership or contact support before deleting your account.`);
+    }
+  }
+
+  // Pass 2: remove membership per tenant. Mirrors claimStaffInvite — read
+  // usersFull + customRoles overlay transactionally, filter the caller out,
+  // reproject staff/admin/cap allow-lists, write both docs atomically.
+  const removedFrom = [];
+  for (const t of tenantsSnap.docs) {
+    const tenantId = t.id;
+    const fullRef = db.doc(`tenants/${tenantId}/data/usersFull`);
+    const projRef = db.doc(`tenants/${tenantId}/data/users`);
+    try {
+      const removed = await db.runTransaction(async (tx) => {
+        const fullSnap = await tx.get(fullRef);
+        if (!fullSnap.exists) return false;
+        const users = fullSnap.data().users || [];
+        const filtered = users.filter(u =>
+          String(u?.email || '').toLowerCase() !== email && u?.uid !== uid);
+        if (filtered.length === users.length) return false;   // not a member here
+        const ovSnap  = await tx.get(db.doc(`tenants/${tenantId}/data/customRoles`));
+        const overlay = ovSnap.exists ? ovSnap.data() : null;
+        const { staffEmails, adminEmails, capEmails } = buildStaffProjection(filtered, overlay);
+        tx.set(fullRef, { users: filtered }, { merge: true });
+        tx.set(projRef, { staffEmails, adminEmails, capEmails }, { merge: true });
+        return true;
+      });
+      if (removed) removedFrom.push(tenantId);
+      await db.doc(`tenants/${tenantId}/userPushTokens/${uid}`).delete().catch(() => {});
+    } catch (e) {
+      // Stop before the auth delete: better to leave the account intact than
+      // to half-remove access and then destroy their ability to retry.
+      console.error(`[deleteMyAccount] tenant=${tenantId} removal failed:`, e && e.message);
+      throw new HttpsError('internal', 'Could not remove your salon access. Nothing was deleted — please try again or contact support.');
+    }
+  }
+
+  // Audit row, then the point of no return.
+  await db.doc(`accountDeletionRequests/${uid}`).set({
+    uid, email: email || null, removedFrom,
+    requestedAt: new Date().toISOString(), via: 'in_app_profile',
+  }).catch(() => {});
+  await getAuth().deleteUser(uid);
+  console.log(`[deleteMyAccount] deleted auth user ${uid} (${email || 'no-email'}); removed from ${removedFrom.length} tenant(s)`);
+  return { ok: true, removedFrom };
 });
 
 // Public, no-auth display for the claim page (so it can show "{Salon} invited
