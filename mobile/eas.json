@@ -29,7 +29,7 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_NEW_PLUME_NEXUS_APP_RECORD_ID",
+        "ascAppId": "6791851203",
         "appleTeamId": "WX8JJUUYSR"
       }
     }
