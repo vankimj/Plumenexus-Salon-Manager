@@ -40,7 +40,10 @@ function randomNonce(len = 32) {
 // 721171829996 clients were from the pre-migration project and rejected
 // id_tokens as invalid_audience.
 const WEB_CLIENT_ID = '563347750501-jlmqatcbesk7r9ltou2sl928sgmtk606.apps.googleusercontent.com';
-const IOS_CLIENT_ID = '563347750501-n1pe3i700s6fh75cpu1sspjjd63n04oa.apps.googleusercontent.com';
+// iOS client is bundle-id-bound: this one belongs to com.plumenexus.salon
+// (Plume Nexus LLC team). The old n1pe3i700s… client was bound to the retired
+// app.plumenexus.pro bundle under JVK.
+const IOS_CLIENT_ID = '563347750501-7pk04kolq41bgbfkhjo8c5dkmu233p1n.apps.googleusercontent.com';
 
 // In Expo Go the native module isn't available — guard the configure
 // call so the screen still renders (with the dev-anonymous fallback).
