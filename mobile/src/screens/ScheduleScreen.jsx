@@ -927,7 +927,9 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
   // Column width adapts to how many techs are shown so filtering down (via the
   // chips above) fills the screen — 1–2 techs span the full width so gaps read
   // clearly; more techs fall back to a fixed width and scroll horizontally.
-  const AXIS_W = 52;
+  // 64pt fits "10:00 AM"/"12:00 PM" at fontSize 11 — 52 clipped the leading
+  // digit off the left screen edge (labels are right-anchored in the axis).
+  const AXIS_W = 64;
   const avail  = Math.max(0, screenW - AXIS_W);
   const fit    = techs.length > 0 ? Math.floor(avail / techs.length) : GRID_COL_W;
   const colW   = fit >= 132 ? Math.min(fit, 240) : GRID_COL_W;
@@ -964,7 +966,7 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
     >
       <View style={{ flexDirection: 'row' }}>
         {/* Fixed time axis */}
-        <View style={{ width: 52 }}>
+        <View style={{ width: AXIS_W }}>
           <View style={{ height: GRID_HEADER_H }} />
           <View style={{ height: GRID_H }}>
             {Array.from({ length: SLOT_COUNT }).map((_, idx) => {
