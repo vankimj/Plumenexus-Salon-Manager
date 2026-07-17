@@ -9,7 +9,6 @@ import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 // Integrity) are coming to mobile in later waves.
 const ROWS = [
   { key: 'AdminUsers',     icon: 'people',    label: 'Users & Roles',  desc: 'Who has access and their role' },
-  { key: 'PreviewRole',    icon: 'people',    label: 'Preview as role', desc: 'See the app as staff, front desk, read-only…' },
   { key: 'AdminSettings',  icon: 'briefcase', label: 'Settings',       desc: 'Salon settings & preferences' },
   { key: 'AdminLogs',      icon: 'clock',     label: 'Activity Log',   desc: 'Recent admin actions' },
   { key: 'AdminFeedback',  icon: 'chat',      label: 'Feedback',       desc: 'Bug reports & ideas from staff' },

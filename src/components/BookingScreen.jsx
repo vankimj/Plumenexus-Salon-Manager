@@ -24,6 +24,7 @@ import {
 import { subscribeLocations, isMultiLocation, activeLocations, employeeInLocation, resolveLocation } from '../lib/locations';
 import { getTheme, detectAutoTheme } from '../lib/themes';
 import { groupByCategory, formatPrice, formatDuration, resolveServicePricing } from '../utils/serviceHelpers';
+import { normURL } from '../utils/helpers';
 import {
   strToMins,
   techCanDo, techsForService, techsForServices,
@@ -2884,7 +2885,7 @@ function SuccessScreen({ appts, techs, webCfg }) {
   const color = CATEGORY_COLORS[firstSvc?.category] || 'var(--tm-primary, #2D7A5F)';
   const address = webCfg?.address || '5029 Olentangy River Rd\nColumbus, OH 43214';
   const addressOneLine = address.replace(/\n/g, ', ');
-  const mapsUrl = webCfg?.mapsUrl || `https://maps.google.com/?q=${encodeURIComponent(addressOneLine)}`;
+  const mapsUrl = normURL(webCfg?.mapsUrl) || `https://maps.google.com/?q=${encodeURIComponent(addressOneLine)}`;
   const phone = webCfg?.phone?.trim();
   const telHref = phone ? `tel:${phone.replace(/[^\d+]/g, '')}` : null;
   const sendEmail = a?.clientEmail;

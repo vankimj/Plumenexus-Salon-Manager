@@ -4,8 +4,7 @@ import { auth, callFn, ALLOWED_EMAILS } from '../lib/firebase';
 import { getCurrentTenant, subscribeTenant } from '../lib/currentTenant';
 import { dedupe } from '../lib/inflight';
 import useMyTenants from './useMyTenants';
-import { usePreviewRole } from '../context/PreviewRoleContext';
-import { applyPreviewAccess } from '../lib/previewAccess';
+import { getPreviewAs, subscribePreviewAs } from '../lib/previewAs';
 
 // Resolves the signed-in user's access in the CURRENT tenant — the
 // mobile equivalent of the web AppContext role flags
@@ -28,6 +27,8 @@ export default function useTenantAccess() {
   const [granular, setGranular] = useState(null);
   const [loading,  setLoading]  = useState(true);
   const [kiosk,    setKiosk]    = useState(null);   // { tenantId, kioskId } | null
+  const [preview,  setPreview]  = useState(getPreviewAs());   // admin "Preview as [role]"
+  useEffect(() => subscribePreviewAs(setPreview), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -64,23 +65,29 @@ export default function useTenantAccess() {
 
   const email   = (auth.currentUser?.email || '').toLowerCase();
   const coarse  = tenants.find(t => t.id === current);
-  const role    = granular?.role || null;
-  const isAdmin =
-    role === 'admin' ||
+  const realRole    = granular?.role || null;
+  const realIsAdmin =
+    realRole === 'admin' ||
     coarse?.role === 'admin' ||
     ALLOWED_EMAILS.includes(email);
-  const techName       = granular?.techName || null;
+  const realTechName   = granular?.techName || null;
   const scheduleAccess = granular?.scheduleAccess || 'edit';
   const plan           = coarse?.plan || null;
-  const canEditSchedule =
-    isAdmin || ((role === 'tech' || role === 'scheduler') && scheduleAccess !== 'view');
 
-  const real = { isAdmin, role, techName, scheduleAccess, plan, canEditSchedule, email, loading, isKioskSession: !!kiosk, kiosk };
+  // "Preview as [role]" (admin-only, client-side): when a real admin has picked
+  // a role to preview, report THAT role + isAdmin:false so the whole app renders
+  // as that role. Ignored for non-admins (defensive). Server enforces real perms.
+  const previewing = realIsAdmin ? preview : null;
+  const role     = previewing ? previewing.role : realRole;
+  const isAdmin  = previewing ? false : realIsAdmin;
+  const techName = previewing ? (previewing.techName || realTechName) : realTechName;
+  const canEditSchedule = previewing
+    ? previewing.role !== 'readonly'
+    : (realIsAdmin || ((realRole === 'tech' || realRole === 'scheduler') && scheduleAccess !== 'view'));
 
-  // "Preview as role" overlay (admin-only, UI-only). With no preview active this
-  // returns `real` augmented with caps/can()/realIsAdmin/isPreviewing — every
-  // existing consumer keeps its fields unchanged. usePreviewRole falls back to a
-  // null-preview default when rendered outside the provider (e.g. kiosk root).
-  const { previewRole, overlay } = usePreviewRole();
-  return applyPreviewAccess(real, previewRole, overlay);
+  return {
+    isAdmin, role, techName, scheduleAccess, plan, canEditSchedule, email, loading,
+    isKioskSession: !!kiosk, kiosk,
+    realIsAdmin, previewAs: previewing,
+  };
 }

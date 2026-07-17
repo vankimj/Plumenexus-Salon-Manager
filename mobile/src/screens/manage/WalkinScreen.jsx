@@ -155,7 +155,6 @@ export default function WalkinScreen() {
       await addWaitlistEntry({
         clientId,
         clientName: name,
-        clientPhone: foundClient?.phone || newPhone.trim(),
         serviceIds: newServiceIds,
         serviceNames,
         requestedTechId: reqTech?.id || null,

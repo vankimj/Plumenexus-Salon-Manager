@@ -5,6 +5,7 @@ import { fetchAppointments, fetchAppointmentsByRange, fetchAppointmentById, subs
 import { isSalonOpenNow, clockedInNameSet, clockedInTodayNameSet, techWorkStatus, isScheduledOnDay, attendanceKey } from '../../lib/shiftGate';
 import { bookableWindow, apptDurationMins } from '../../lib/booking';
 import { computeNextOpening, computeSeatStart } from './seatTime';
+import { techApptWindow, buildTechApptHours, daySpanFromTechHours } from '../../lib/apptHours';
 import ClientSearch from './ClientSearch';
 import { callFn, startTrace } from '../../lib/firebase';
 import CheckoutModal from '../checkout/CheckoutModal';
@@ -252,10 +253,15 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   const storeDay = settings.storeHours?.[dow_] || {};
   const walkInOpen  = strToMins(storeDay.open  || settings.walkIn?.open  || '09:00');
   const walkInClose = strToMins(storeDay.close || settings.walkIn?.close || '18:00');
-  const apptOpen    = strToMins(settings.apptHours?.open  || '09:00');
-  const apptClose   = strToMins(settings.apptHours?.close || '20:00');
-  const dayStart    = Math.min(walkInOpen, apptOpen);
-  const dayEnd      = Math.max(walkInClose, apptClose);
+  // Per-tech appointment-only windows for the displayed day. The grid spans the
+  // widest tech window (so extended slots are visible); each tech's blue
+  // "appointment-only" zone is bounded by their own window. Legacy salon-wide
+  // settings.apptHours is a migration fallback for extended techs not yet given
+  // a per-tech window.
+  const techWindows = buildTechApptHours(empRecords, settings, dow_, settings.apptHours);
+  const apptSpan    = daySpanFromTechHours(techWindows, walkInOpen, walkInClose);
+  const dayStart    = apptSpan.open;
+  const dayEnd      = apptSpan.close;
   const slots = [];
   for (let m = dayStart; m < dayEnd; m += 30) slots.push(m);
   const [appts,        setAppts]       = useState([]);
@@ -281,6 +287,7 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   const [services,     setServices]    = useState([]);
   const [techs,        setTechs]       = useState(FALLBACK_TECHS);
   const [techExtended,     setTechExtended]     = useState({});
+  const [empRecords,       setEmpRecords]       = useState([]); // active employee records (for per-tech appt windows)
   const [showAll,          setShowAll]          = useState(false);
   const [showHours,        setShowHours]        = useState(false);
   const [showTimeOff,      setShowTimeOff]      = useState(false);
@@ -453,34 +460,40 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
         });
         setTechExtended(ext);
         setEmpWorkDays(wd);
+        setEmpRecords(active);
       }
     }).catch(() => {});
   }, []);
 
   // Clients whose birthday month+day matches the selected date
-  const birthdayClients = clients.filter(c => {
+  const birthdayClients = useMemo(() => clients.filter(c => {
     if (!c.birthday) return false;
     const [, bm, bd] = c.birthday.split('-');
     const [, dm, dd] = date.split('-');
     return bm === dm && bd === dd;
-  });
+  }), [clients, date]);
 
-  const birthdayEmployees = employees.filter(e => {
+  const birthdayEmployees = useMemo(() => employees.filter(e => {
     if (!e.birthday) return false;
     const [, bm, bd] = e.birthday.split('-');
     const [, dm, dd] = date.split('-');
     return bm === dm && bd === dd;
-  });
+  }), [employees, date]);
 
   // Earliest free start (minutes since midnight) for a tech TODAY, and the
   // default start time for a seated walk-in. Both delegate to the pure,
   // unit-tested helpers in ./seatTime (see seatTime.test.js) — passing the live
   // component state + `now` so the logic stays in one tested place.
+  function techApptWindowToday(techName) {
+    const dow = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+    const emp = empRecords.find(e => e.name === techName);
+    return emp ? techApptWindow(emp, settings, dow, settings.apptHours) : null;
+  }
   function nextOpeningMins(techName, durationMins = 60) {
-    return computeNextOpening({ settings, empWorkDays, appts, now: new Date(), techName, durationMins, today: todayStr() });
+    return computeNextOpening({ settings, empWorkDays, appts, now: new Date(), techName, durationMins, today: todayStr(), apptWindow: techApptWindowToday(techName) });
   }
   function seatStartMins(techName, durationMins = 60) {
-    return computeSeatStart({ settings, empWorkDays, appts, now: new Date(), techName, durationMins, today: todayStr() });
+    return computeSeatStart({ settings, empWorkDays, appts, now: new Date(), techName, durationMins, today: todayStr(), apptWindow: techApptWindowToday(techName) });
   }
 
   async function handleSave(appt, original, pendingSeat) {
@@ -914,8 +927,8 @@ function openNew(techName, slotMins) {
     const wd = empWorkDays[t]?.[dow];
     const hasShift = !!empWorkDays[t] && Object.keys(empWorkDays[t]).length > 0;
     const blocks = timeOffOnDate(timeOff, t, date);
-    const start = wd?.start ? strToMins(wd.start) : strToMins(settings.apptHours?.open  || '09:00');
-    const end   = wd?.end   ? strToMins(wd.end)   : strToMins(settings.apptHours?.close || '20:00');
+    const start = wd?.start ? strToMins(wd.start) : (techWindows[t]?.open ?? 540);
+    const end   = wd?.end   ? strToMins(wd.end)   : (techWindows[t]?.close ?? 1080);
     return techWorkStatus({
       isToday,
       // Clocked in today/now (union with profile hours) so the buttons reflect
@@ -1159,10 +1172,11 @@ function openNew(techName, slotMins) {
             // doesn't advance. _turnCredited rides on the appt so a later checkout
             // won't double-count the turn. Carry the queue entry's existing client
             // link + contact so the appt is prefilled (and saves without re-keying).
+            const qc = clients.find(c => c.id === entry.clientId) || {};
             setModal({
               appt: {
-                ...blankAppt(todayStr(), next.techName, nStart, entry.clientName, entry.serviceName,
-                  { clientId: entry.clientId, clientPhone: entry.clientPhone, clientEmail: entry.clientEmail }),
+                ...blankAppt(todayStr(), next.techName, nStart, qc.name || entry.clientName, entry.serviceName,
+                  { clientId: entry.clientId, clientPhone: qc.phone || '', clientEmail: qc.email || '' }),
                 _turnCredited: new Date().toISOString(),
               },
               original: null,
@@ -1184,8 +1198,9 @@ function openNew(techName, slotMins) {
             // doesn't pre-credit a turn — it's reconciled at checkout / Recount.
             // Carry the queue entry's existing client link + contact so the appt
             // is prefilled and saves without re-keying the customer.
-            setModal({ appt: blankAppt(todayStr(), sTech, sStart, entry.clientName, entry.serviceName,
-              { clientId: entry.clientId, clientPhone: entry.clientPhone, clientEmail: entry.clientEmail }), original: null, mode: 'edit', pendingSeat: { entryId: entry.id } });
+            const sc = clients.find(c => c.id === entry.clientId) || {};
+            setModal({ appt: blankAppt(todayStr(), sTech, sStart, sc.name || entry.clientName, entry.serviceName,
+              { clientId: entry.clientId, clientPhone: sc.phone || '', clientEmail: sc.email || '' }), original: null, mode: 'edit', pendingSeat: { entryId: entry.id } });
           }}
           onRemove={async entry => { await removeWaitlistEntry(entry.id).catch(() => {}); }}
           onDone={async entry => { await updateWaitlistEntry(entry.id, { status: 'done' }).catch(() => {}); }}
@@ -1350,6 +1365,7 @@ function openNew(techName, slotMins) {
               allTechs={techs}
               clients={clients}
               techExtended={techExtended}
+              techWindows={techWindows}
               empWorkDays={empWorkDays}
               slots={slots}
               dayStart={dayStart}
@@ -1894,7 +1910,7 @@ function WeekGrid({ weekStart, appts, clients, employees, allTechs, onApptClick,
 }
 
 // ── Day grid ──────────────────────────────────────────
-function DayGrid({ date, appts, timeOff = [], techs, offToday, dividerTech, allTechs, clients = [], techExtended, empWorkDays, slots, dayStart, walkInOpen, walkInClose, techColWidth, focusedTech, onToggleFocusTech, onSlotClick, onApptClick, onApptReschedule }) {
+function DayGrid({ date, appts, timeOff = [], techs, offToday, dividerTech, allTechs, clients = [], techExtended, techWindows = {}, empWorkDays, slots, dayStart, walkInOpen, walkInClose, techColWidth, focusedTech, onToggleFocusTech, onSlotClick, onApptClick, onApptReschedule }) {
   // Pointer-event drag-to-reschedule. Works on both mouse and touch
   // (iPad/iPhone) — HTML5 D&D doesn't work on touch devices natively.
   // Dragging happens in two phases:
@@ -2116,7 +2132,10 @@ function DayGrid({ date, appts, timeOff = [], techs, offToday, dividerTech, allT
               // staff can't book over a tech's day off by mistake.
               const interactive = !isOff && !blockedBy;
               const clickable   = true;
-              const inExtended  = !inWalkIn && techExtended[tech];
+              // Per-tech appointment-only zone: outside store hours but within
+              // THIS tech's own appointment window (not a salon-wide window).
+              const tw          = techWindows[tech];
+              const inExtended  = !inWalkIn && techExtended[tech] && (!tw || (slotMins >= tw.open && slotMins < tw.close));
               const slotKey = `${tech}:${slotMins}`;
               // Drop hover lights up on every cell — interactive or not. The
               // onUp handler gates the actual reschedule with a confirm
@@ -4580,8 +4599,6 @@ function HoursModal({ settings, updateSettings, onClose }) {
     WEEK_DAYS.forEach(d => { h[d] = { ...DEFAULT_DAY, ...saved[d] }; });
     return h;
   });
-  const [apptOpen,  setApptOpen]  = useState(settings.apptHours?.open  || '09:00');
-  const [apptClose, setApptClose] = useState(settings.apptHours?.close || '20:00');
   const [lateEnabled, setLateEnabled] = useState(settings.lateCheckinAlert?.enabled !== false);
   const [lateMins,    setLateMins]    = useState(String(Number(settings.lateCheckinAlert?.minutes) > 0 ? Number(settings.lateCheckinAlert.minutes) : 15));
   const [saving,    setSaving]    = useState(false);
@@ -4594,7 +4611,11 @@ function HoursModal({ settings, updateSettings, onClose }) {
     setSaving(true);
     try {
       const lm = Math.max(1, Math.min(120, parseInt(lateMins, 10) || 15));
-      await updateSettings({ ...settings, storeHours: hours, apptHours: { open: apptOpen, close: apptClose },
+      // Note: salon-wide apptHours is intentionally NOT written here anymore —
+      // appointment-only hours are per-tech now. The existing settings.apptHours
+      // value is left in place as a migration fallback for extended techs that
+      // haven't been given a per-tech window yet (see techApptWindow).
+      await updateSettings({ ...settings, storeHours: hours,
         lateCheckinAlert: { enabled: lateEnabled, minutes: lm } });
       // Mirror to the publicly-readable webfront doc so the public website
       // (which can't read staff-only `settings`) shows the same hours, AND the
@@ -4650,17 +4671,11 @@ function HoursModal({ settings, updateSettings, onClose }) {
             );
           })}
 
-          {/* Extended appt hours */}
+          {/* Appointment-only hours are now PER-TECH (Employees → tech →
+              "Can be booked outside store hours"), not one salon-wide window. */}
           <div style={{ marginTop: 16, padding: '12px', background: 'var(--pn-info-bg)', borderRadius: 10, border: '1px solid #c7dff7' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pn-info)', marginBottom: 8 }}>Extended appointment hours</div>
-            <div style={{ fontSize: 11, color: 'var(--pn-info)', marginBottom: 10 }}>Appointment-only slots outside published store hours. Set same as store open/close to disable.</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="time" value={apptOpen}  onChange={e => setApptOpen(e.target.value)}
-                style={{ fontFamily: 'inherit', border: '1px solid #c7dff7', borderRadius: 8, padding: '6px 8px', fontSize: 12, flex: 1 }} />
-              <span style={{ color: 'var(--pn-text-faint)' }}>–</span>
-              <input type="time" value={apptClose} onChange={e => setApptClose(e.target.value)}
-                style={{ fontFamily: 'inherit', border: '1px solid #c7dff7', borderRadius: 8, padding: '6px 8px', fontSize: 12, flex: 1 }} />
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pn-info)', marginBottom: 4 }}>Appointment-only hours</div>
+            <div style={{ fontSize: 11, color: 'var(--pn-info)', lineHeight: 1.5 }}>Now set <strong>per tech</strong> — open a tech in <strong>Employees</strong> and turn on “Can be booked outside store hours (appointment-only).” Each tech's window defaults to your store hours.</div>
           </div>
 
           {/* Late check-in alert */}

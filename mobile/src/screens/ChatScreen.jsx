@@ -137,7 +137,7 @@ function ComposeModal({ open, onClose, onSent }) {
 
   useEffect(() => {
     if (!open) return;
-    fetchClients().then(setAllClients).catch(() => setAllClients([]));
+    fetchClients({ max: 500 }).then(setAllClients).catch(() => setAllClients([]));
     setSearch('');
     setPicked(null);
     setChannel('app');

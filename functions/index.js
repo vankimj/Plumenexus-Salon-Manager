@@ -18,6 +18,7 @@ const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notifi
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
+const recordSaleLib        = require('./lib/recordSale');
 const ledger               = require('./lib/ledger');
 const { renderTemplate, getTemplatePhrases } = require('./lib/messageTemplates');
 
@@ -109,6 +110,14 @@ const twilioFrom      = defineString('TWILIO_FROM',        { default: '' });
 const smsProvider       = defineString('SMS_PROVIDER',        { default: 'twilio' });
 const awsSmsRegion      = defineString('AWS_SMS_REGION',      { default: '' }); // falls back to AWS_SES_REGION
 const awsSmsOrigination = defineString('AWS_SMS_ORIGINATION', { default: '' }); // shared #/pool, filled after provisioning
+// AWS End User Messaging config set that routes delivery events (SENT/DELIVERED/
+// BLOCKED/CARRIER_BLOCKED/SPAM/…) to an SNS topic → the smsDeliveryStatus CF.
+// Empty = send without delivery tracking (fire-and-forget). Set to 'salon-sms'.
+const awsSmsConfigSet   = defineString('AWS_SMS_CONFIG_SET',  { default: '' });
+// SNS topic the salon-sms config set publishes delivery events to. The
+// smsDeliveryStatus webhook only accepts events (and confirms subscriptions)
+// bearing this exact TopicArn — a cheap spoof-gate on the public endpoint.
+const awsSmsDeliveryTopic = defineString('AWS_SMS_DELIVERY_TOPIC_ARN', { default: 'arn:aws:sns:us-west-2:397712771247:salon-sms-delivery' });
 const { sendViaAwsSms } = require('./lib/awsSms');
 const _smsProviderCache = new Map(); // tenantId → { provider, at }
 
@@ -257,6 +266,25 @@ async function requireTenantStaff(db, tenantId, request) {
     throw new HttpsError('permission-denied', 'Not a staff member of this tenant');
   }
 }
+// Tenant staff who may WRITE: any staff EXCEPT a readonly user — the server-side
+// mirror of the rules' isTenantWriter (isTenantStaff && !isTenantReadonly). Use on
+// write-intent callables so a readonly user (email in data/users.readonlyEmails) is
+// rejected server-side, not merely hidden in the UI. Bootstrap admins + tenant
+// owners always pass (requireTenantStaff returns early for them; they are never in
+// readonlyEmails, kept in sync by buildStaffProjection).
+async function requireTenantWriter(db, tenantId, request) {
+  await requireTenantStaff(db, tenantId, request);   // must be staff of this tenant first
+  if (await isBootstrapAdmin(request)) return;
+  const email = await callerEmail(request);
+  const tenDoc = await db.doc(`tenants/${tenantId}`).get();
+  if (tenDoc.exists && (tenDoc.data().ownerEmail || '').toLowerCase() === email) return;
+  const usersDoc = await db.doc(`tenants/${tenantId}/data/users`).get();
+  const readonlyEmails = (usersDoc.exists ? (usersDoc.data().readonlyEmails || []) : [])
+    .map(e => String(e || '').toLowerCase());
+  if (readonlyEmails.includes(email)) {
+    throw new HttpsError('permission-denied', 'Your role is read-only and cannot make changes.');
+  }
+}
 async function requireTenantAdmin(db, tenantId, request) {
   if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
   const email = await callerEmail(request);
@@ -320,7 +348,13 @@ function buildStaffProjection(users, overlay) {
       .filter(u => u && u.email && resolveRoleCaps(u.role, overlay).includes(cap))
       .map(u => lc(u.email)).filter(Boolean)));
   }
-  return { staffEmails, adminEmails, capEmails };
+  // Built-in `readonly` role → the rules' isTenantReadonly() reads this to deny
+  // writes (readonly keeps its reads via staffEmails; isTenantWriter withholds
+  // only writes). MUST match src/lib/userProjections.js buildReadonlyEmails.
+  const readonlyEmails = Array.from(new Set((users || [])
+    .filter(u => u && u.email && normalizeRole(u.role) === 'readonly')
+    .map(u => lc(u.email)).filter(Boolean)));
+  return { staffEmails, adminEmails, capEmails, readonlyEmails };
 }
 // RBAC server enforcement: throw unless the caller's role has `cap` (see
 // lib/rbac.js — kept in sync with src/lib/rbac.js). The UI hides the control;
@@ -1010,11 +1044,13 @@ async function sendSms({
   if (provider === 'aws') {
     const origination = awsSmsOrigination.value();
     if (!origination) return { ok: false, error: 'aws_sms_no_origination' };
+    const configurationSet = awsSmsConfigSet.value() || undefined;
     const res = await sendViaAwsSms({
       to:                phone,
       body:              finalBody,
       originationNumber: origination,
       messageType:       kind === 'marketing' ? 'PROMOTIONAL' : 'TRANSACTIONAL',
+      configurationSet,
       config: {
         region:          awsSmsRegion.value() || awsSesRegion.value() || 'us-west-2',
         accessKeyId:     awsAccessKey.value(),
@@ -1029,6 +1065,17 @@ async function sendSms({
     usageLog.logSmsUsage(db, tenantId, {
       kind: `appt_${kind}`, to: phone, body: finalBody, sid: res.messageId, provider: 'aws',
     }).catch(() => {});
+    // Delivery-tracking outbox: map this AWS messageId → its tenant so the
+    // smsDeliveryStatus CF can attribute the carrier events that follow. Only
+    // when a config set is attached (else no events will ever arrive) and a
+    // messageId came back. The messageId is an unguessable UUID → it also gates
+    // event writes (an event we didn't send maps to nothing). Best-effort.
+    if (configurationSet && res.messageId) {
+      db.doc(`smsOutbox/${res.messageId}`).set({
+        tenantId, clientId: clientId || null, kind, dest: phone,
+        createdAt: new Date().toISOString(),
+      }).catch((e) => console.warn(`[sendSms] outbox write failed msg=${res.messageId}:`, e?.message));
+    }
     return { ok: true, sid: res.messageId, twilioStatus: null };
   }
 
@@ -2507,10 +2554,11 @@ exports.kioskWalkinOptions = onCall({ cors: true }, async (request) => {
   const settings = sSnap.exists ? (sSnap.data() || {}) : {};
   const storeDay = settings.storeHours?.[dow] || null;
   if (storeDay && storeDay.closed) return { options: [], noPrefEarliest: null, anyAvailable: false, salonClosed: true };
-  const apptOpen  = strToMins(settings.apptHours?.open  || '09:00') ?? 540;
-  const apptClose = strToMins(settings.apptHours?.close || '20:00') ?? 1200;
-  const storeOpen  = storeDay && storeDay.open  ? (strToMins(storeDay.open)  ?? apptOpen)  : apptOpen;
-  const storeClose = storeDay && storeDay.close ? (strToMins(storeDay.close) ?? apptClose) : apptClose;
+  // Walk-ins are seated during STORE hours (the per-tech appointment-only
+  // extended window is for booked appointments, not walk-ins). Default 9am-6pm
+  // when a day's store hours aren't set.
+  const storeOpen  = storeDay && storeDay.open  ? (strToMins(storeDay.open)  ?? 540)  : 540;
+  const storeClose = storeDay && storeDay.close ? (strToMins(storeDay.close) ?? 1080) : 1080;
 
   const svcSnap = await db.doc(`tenants/${tenantId}/services/${serviceId}`).get();
   if (!svcSnap.exists) throw new HttpsError('invalid-argument', 'Unknown service.');
@@ -3147,10 +3195,11 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
   const isFounder = await isBootstrapAdmin(request);
 
   const tenantsSnap = await db.collection('tenants').get();
-  const results = [];
-  for (const t of tenantsSnap.docs) {
+  // Resolve each active tenant's role for the caller in PARALLEL — the slim
+  // projection reads were previously awaited one-at-a-time in a for-loop.
+  const activeDocs = tenantsSnap.docs.filter(t => (t.data() || {}).active !== false);
+  const resolved = await Promise.all(activeDocs.map(async (t) => {
     const td = t.data() || {};
-    if (td.active === false) continue;
     const tenantId = t.id;
     const ownerEmailLower = (td.ownerEmail || '').toLowerCase();
 
@@ -3173,16 +3222,16 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
       } catch (_) { /* projection unreadable — caller has no role here */ }
     }
 
-    if (role) {
-      results.push({
-        id:         tenantId,
-        name:       td.name || tenantId,
-        plan:       td.plan || null,
-        subdomain:  td.subdomain || tenantId,
-        role,
-      });
-    }
-  }
+    if (!role) return null;
+    return {
+      id:         tenantId,
+      name:       td.name || tenantId,
+      plan:       td.plan || null,
+      subdomain:  td.subdomain || tenantId,
+      role,
+    };
+  }));
+  const results = resolved.filter(Boolean);
 
   // Sort: tenant where role is admin first, then by name.
   results.sort((a, b) => {
@@ -3774,6 +3823,29 @@ exports.emailEmployeeInvite = onCall({ cors: true }, async (request) => {
 //     from the admin-minted invite (never from the client) against a whitelist.
 //   • Stored role uses the legacy vocabulary the projections key on
 //     (admin/manager/scheduler/tech/readonly) — see src/lib/userProjections.js.
+// Employee contact PII (phone/address/city/state/zip/notes) lives in the
+// staff-only sub-doc employees/{id}/contact/info — the parent employee doc is
+// PUBLICLY readable (booking page), so contact PII must never sit on it.
+// Admin-SDK code paths that need those fields merge the sub-doc explicitly.
+// (`email` stays on the parent: it is the auth/login join-key + a
+// where('email') query target, so it is NOT moved.)
+async function loadEmpContact(db, tenantId, id) {
+  try {
+    // Read the staff-only contact subdoc AND the parent, and fall back to the
+    // legacy parent fields per-key. This keeps every reader correct BOTH before
+    // and after the PII migration (deploy order becomes irrelevant, and no tech
+    // ever loses a phone in the deploy->migrate window). Subdoc wins.
+    const [pSnap, sSnap] = await Promise.all([
+      db.doc(`tenants/${tenantId}/employees/${id}`).get(),
+      db.doc(`tenants/${tenantId}/employees/${id}/contact/info`).get(),
+    ]);
+    const p = pSnap.exists ? (pSnap.data() || {}) : {};
+    const c = sSnap.exists ? (sSnap.data() || {}) : {};
+    const pick = (k) => (c[k] != null ? c[k] : (p[k] != null ? p[k] : null));
+    return { phone: pick('phone'), address: pick('address'), city: pick('city'), state: pick('state'), zip: pick('zip'), notes: pick('notes') };
+  } catch (_) { return {}; }
+}
+
 const STAFF_INVITE_ROLES = {
   tech:      { store: 'tech',      label: 'a nail tech' },
   scheduler: { store: 'scheduler', label: 'front desk (scheduler)' },
@@ -3814,13 +3886,14 @@ exports.createStaffInvite = onCall({ cors: true }, async (request) => {
   const empRef = db.collection(`tenants/${tenantId}/employees`).doc();
   await empRef.set({
     name: name || 'New team member',
-    phone,
     role: roleDef.store,
     active: true,
     pendingInvite: true,
     createdAt: nowIso,
     updatedAt: nowIso,
   });
+  // Phone is contact PII — keep it OFF the publicly-readable parent doc.
+  if (phone) await empRef.collection('contact').doc('info').set({ phone, updatedAt: nowIso }, { merge: true });
 
   await db.doc(`staffInvites/${token}`).set({
     tenantId,
@@ -3907,10 +3980,10 @@ exports.claimStaffInvite = onCall({ cors: true }, async (request) => {
     };
     if (idx >= 0) users[idx] = merged; else users.push(merged);
 
-    const { staffEmails, adminEmails, capEmails } = buildStaffProjection(users, overlay);
+    const { staffEmails, adminEmails, capEmails, readonlyEmails } = buildStaffProjection(users, overlay);
 
     tx.set(fullRef, { users }, { merge: true });
-    tx.set(projRef, { staffEmails, adminEmails, capEmails }, { merge: true });
+    tx.set(projRef, { staffEmails, adminEmails, capEmails, readonlyEmails }, { merge: true });
     tx.set(inviteRef, { status: 'claimed', claimedByUid: uid, claimedByEmail: email, claimedAt: new Date().toISOString() }, { merge: true });
 
     return { tenantId, role, employeeId: inv.employeeId || null };
@@ -4164,6 +4237,7 @@ exports.clockEvent = onCall({ cors: true }, async (request) => {
   const empSnap = await empRef.get();
   if (!empSnap.exists) throw new HttpsError('not-found', 'Employee not found');
   const emp = empSnap.data() || {};
+  Object.assign(emp, await loadEmpContact(db, tenantId, employeeId));
   if (emp.active === false) {
     throw new HttpsError('failed-precondition', 'Employee is inactive');
   }
@@ -4723,6 +4797,166 @@ exports.recordKioskSale = onCall({ secrets: [stripeKey], cors: true }, async (re
   return { ok: true, saleId, total: totals.total, changeDue, sideEffectErrors };
 });
 
+// ── Server-authoritative checkout redemptions ─────────────────────────────────
+// Applies the money-BALANCE mutations a POS checkout must not do from the client:
+// store-credit decrement, gift-card decrement, and promo usage — each CAPPED to
+// the real balance/limit and applied in ONE atomic transaction, idempotent by
+// saleId. This is what lets the rules DENY direct client writes to clients.credit
+// (a tech could otherwise set credit=9999 and redeem it) and moves gift-card /
+// promo redemption off the client (was a non-atomic double-spend, and silently
+// permission-denied for non-admin staff). Returns the amounts ACTUALLY applied so
+// the caller stamps them on the receipt. Receipt/appt/ledger/loyalty are unchanged
+// (ledger + loyalty are receipt-trigger driven).
+exports.redeemAtCheckout = onCall({ cors: true }, async (request) => {
+  const db = getFirestore();
+  const d = request.data || {};
+  const tenantId = String(d.tenantId || TENANT_ID).slice(0, 64);
+  if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) throw new HttpsError('invalid-argument', 'Invalid tenantId');
+  if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const tok = request.auth.token || {};
+  const isKioskCaller = tok.kiosk === true && tok.tenantId === tenantId;
+  if (!isKioskCaller) await requireTenantWriter(db, tenantId, request);
+
+  const clean = (v, n) => (v ? String(v).slice(0, n) : null);
+  const saleId         = clean(d.saleId, 64);
+  const clientId       = clean(d.clientId, 128);
+  const giftCardId     = clean(d.giftCardId, 128);
+  const promoId        = clean(d.promoId, 128);
+  const creditToApply  = Math.max(0, Number(d.creditToApply) || 0);
+  const issueCredit    = Math.max(0, Number(d.issueCredit) || 0);   // change-to-store-credit
+  const giftCardAmount = Math.max(0, Number(d.giftCardAmount) || 0);
+  const loyaltyPointsToRedeem = Math.max(0, Math.floor(Number(d.loyaltyPointsToRedeem) || 0));
+  // CAP: change-to-store-credit may never exceed the sale's actual change due (what
+  // the client overpaid). Anything more would MINT credit from nothing, so reject.
+  // Callers MUST send maxIssueCredit (the change due) whenever issuing credit.
+  const maxIssueCredit = Math.max(0, Number(d.maxIssueCredit) || 0);
+  if (issueCredit > 0 && issueCredit > maxIssueCredit + 0.005) {
+    throw new HttpsError('invalid-argument', 'issueCredit exceeds the change due for this sale');
+  }
+  const nowIso = new Date().toISOString();
+  // Idempotency marker keyed by saleId — a retry (or offline replay) returns the
+  // recorded result without decrementing a second time.
+  const markRef = db.doc(`tenants/${tenantId}/checkoutRedemptions/${saleId || genServerReceiptToken(20)}`);
+
+  return await db.runTransaction(async (tx) => {
+    // Firestore: ALL reads before ANY writes.
+    const markSnap = saleId ? await tx.get(markRef) : null;
+    if (markSnap && markSnap.exists) { const saved = markSnap.data().result; return saved ? { ...saved, alreadyApplied: true } : { appliedCredit: 0, appliedGiftCard: 0, promoApplied: false, alreadyApplied: true }; }
+
+    const cRef = ((creditToApply > 0 || issueCredit > 0 || loyaltyPointsToRedeem > 0) && clientId) ? db.doc(`tenants/${tenantId}/clients/${clientId}`) : null;
+    const gRef = (giftCardAmount > 0 && giftCardId) ? db.doc(`tenants/${tenantId}/giftCards/${giftCardId}`) : null;
+    const pRef = promoId ? db.doc(`tenants/${tenantId}/promoCodes/${promoId}`) : null;
+    const cSnap = cRef ? await tx.get(cRef) : null;
+    const gSnap = gRef ? await tx.get(gRef) : null;
+    const pSnap = pRef ? await tx.get(pRef) : null;
+
+    const result = { appliedCredit: 0, issuedCredit: 0, redeemedLoyaltyPoints: 0, appliedGiftCard: 0, promoApplied: false };
+
+    if (cSnap) {
+      const cData = cSnap.data() || {};
+      const cur = Number(cData.credit) || 0;
+      const applied = Math.max(0, Math.min(creditToApply, cur));   // redeem capped to real balance
+      const newCredit = Math.max(0, cur - applied) + issueCredit;  // then add any change-to-credit
+      // Loyalty redemption — capped to the client's REAL points balance and
+      // decremented in THIS transaction (loyaltyPoints/loyaltyHistory mirror
+      // creditLoyaltyOnReceipt, the earn trigger).
+      const curPts = Number(cData.loyaltyPoints) || 0;
+      const redeemedPts = Math.max(0, Math.min(loyaltyPointsToRedeem, curPts));
+      const patch = { updatedAt: nowIso };
+      if (applied > 0 || issueCredit > 0) patch.credit = newCredit;
+      if (redeemedPts > 0) patch.loyaltyPoints = Math.max(0, curPts - redeemedPts);
+      if (patch.credit !== undefined || patch.loyaltyPoints !== undefined) tx.set(cRef, patch, { merge: true });
+      if (redeemedPts > 0) {
+        tx.set(cRef.collection('loyaltyHistory').doc(), {
+          type: 'redeem', points: -redeemedPts, receiptId: saleId || null,
+          reason: 'Redeemed at checkout', createdAt: nowIso,
+        });
+      }
+      result.appliedCredit = applied;
+      result.issuedCredit = issueCredit;
+      result.redeemedLoyaltyPoints = redeemedPts;
+    }
+    if (gSnap && gSnap.exists) {
+      const g = gSnap.data();
+      const cur = Number(g?.balance) || 0;
+      const applied = Math.max(0, Math.min(giftCardAmount, cur));
+      if (applied > 0) { tx.set(gRef, { balance: Math.max(0, cur - applied), updatedAt: nowIso }, { merge: true }); result.appliedGiftCard = applied; }
+    }
+    if (pSnap && pSnap.exists) {
+      const p = pSnap.data();
+      const newCount = (Number(p.usedCount) || 0) + 1;
+      const maxHit = p.maxUses && newCount >= p.maxUses;
+      tx.set(pRef, {
+        usedCount: newCount,
+        ...((p.singleUse || maxHit) ? { active: false } : {}),
+        ...(p.singleUse ? { usedAt: nowIso } : {}),
+        updatedAt: nowIso,
+      }, { merge: true });
+      result.promoApplied = true;
+    }
+
+    if (saleId) tx.set(markRef, { result, saleId, at: nowIso }, { merge: true });
+    return result;
+  });
+});
+
+// ── Server-authoritative sale recording (web + mobile staff POS) ──────────────
+// Writes the canonical receipt + marks appts done SERVER-side so a tech can't
+// author a receipt that inflates their own commission/payroll. Two guarantees:
+//   1. Card: the Stripe PaymentIntent must have captured the recorded total for
+//      THIS tenant (verifyCapture) — you can't record more revenue than was paid.
+//   2. techSplit is DERIVED server-side from the line items (buildTechSplit with
+//      the client's tipByTech, so a legit split matches exactly) — you can't
+//      hand-craft a split. The total is NOT re-derived (taken from the client's
+//      charged total + verified against the capture), so the charge math can't
+//      diverge and reject a legit sale. Idempotent by saleId. Redemptions stay in
+//      redeemAtCheckout; product stock + loyalty stay client-side.
+exports.recordSale = onCall({ secrets: [stripeKey], cors: true }, async (request) => {
+  const db = getFirestore();
+  const d = request.data || {};
+  const tenantId = String(d.tenantId || TENANT_ID).slice(0, 64);
+  if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) throw new HttpsError('invalid-argument', 'Invalid tenantId');
+  if (!request?.auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const tok = request.auth.token || {};
+  const isKioskCaller = tok.kiosk === true && tok.tenantId === tenantId;
+  if (!isKioskCaller) await requireTenantStaff(db, tenantId, request);
+  const paidBy = (tok.email || '').toLowerCase() || (isKioskCaller ? 'kiosk' : 'staff');
+
+  const saleId = String(d.saleId || genServerReceiptToken(20)).slice(0, 64);
+  const rcptRef = db.doc(`tenants/${tenantId}/receipts/${saleId}`);
+  if ((await rcptRef.get()).exists) return { ok: true, alreadyRecorded: true, saleId };
+
+  const method = d.method === 'card' ? 'card' : 'cash';
+  const nowIso = new Date().toISOString();
+  const built = recordSaleLib.buildSaleRecords({ ...d, saleId, method, paidBy, nowIso });
+
+  // Only require + verify a PaymentIntent when there was actually something to
+  // charge. A "card" sale fully covered by gift card / store credit / loyalty
+  // has expectedChargeCents === 0 and no PI — recording it must NOT throw (that
+  // would lose the sale while the redemption already ran). Adversarial-review
+  // finding: $0-card = silent data loss.
+  if (method === 'card' && built.expectedChargeCents > 0) {
+    const piId = d.stripePaymentIntentId ? String(d.stripePaymentIntentId).slice(0, 64) : null;
+    if (!/^pi_[A-Za-z0-9]+$/.test(piId || '')) throw new HttpsError('invalid-argument', 'Valid stripePaymentIntentId required');
+    const key = stripeKey.value();
+    if (!key) throw new HttpsError('failed-precondition', 'Stripe is not configured');
+    const pi = await require('stripe')(key).paymentIntents.retrieve(piId);
+    const chk = recordSaleLib.verifyCapture({ method, pi, tenantId, expectedChargeCents: built.expectedChargeCents });
+    if (!chk.ok) throw new HttpsError('failed-precondition', `Payment verification failed (${chk.reason})`);
+    built.receipt.payment.stripePaymentIntentId = piId;
+  }
+
+  const sideEffectErrors = [];
+  for (const u of built.apptUpdates) {
+    await db.doc(`tenants/${tenantId}/appointments/${u.id}`)
+      .set({ status: 'done', payment: { ...built.receipt.payment, amountForThisAppt: u.apptSubtotal }, updatedAt: nowIso }, { merge: true })
+      .catch(e => sideEffectErrors.push('appt: ' + (e?.message || 'failed')));
+  }
+  await rcptRef.set(built.receipt, { merge: true });
+
+  return { ok: true, saleId, total: built.payment.total, changeDue: built.changeDue, split: built.payment.techSplit, sideEffectErrors };
+});
+
 // Verify the CALLER's own kiosk-exit PIN (to leave a locked kiosk). request.auth
 // identifies the admin who entered; only their own PIN unlocks. Returns {ok}.
 exports.verifyKioskPin = onCall({ cors: true }, async (request) => {
@@ -4917,12 +5151,23 @@ exports.manageAppointment = onCall({ cors: true, secrets: [apptManageSecret] }, 
       const dow = target.toLocaleDateString('en-US', { weekday: 'short' });
       const sh = settings.storeHours?.[dow] || {};
       if (sh.closed) continue;
-      const open  = strToMins(sh.open  || settings.apptHours?.open  || '09:00');
-      const close = strToMins(sh.close || settings.apptHours?.close || '18:00');
       // Check tech is on that day-of-week
       const empSnap = await db.collection(`tenants/${tid}/employees`).where('name', '==', appt.techName).limit(1).get();
       const emp = empSnap.empty ? null : empSnap.docs[0].data();
       if (emp?.workDays && emp.workDays[dow]?.on === false) continue;
+      // Per-tech appointment window: store hours, widened to the tech's own
+      // appointment-only hours when extendedHoursAllowed (mirrors techApptWindow
+      // in src/lib/apptHours.js). Appointment-only hours are per-tech now, not
+      // the retired salon-wide settings.apptHours.
+      const storeOpenM  = strToMins(sh.open  || '09:00');
+      const storeCloseM = strToMins(sh.close || '18:00');
+      let open = storeOpenM, close = storeCloseM;
+      if (emp?.extendedHoursAllowed && emp.apptHours) {
+        const ao = emp.apptHours.open  ? strToMins(emp.apptHours.open)  : storeOpenM;
+        const ac = emp.apptHours.close ? strToMins(emp.apptHours.close) : storeCloseM;
+        open  = Math.min(open, ao);
+        close = Math.max(close, ac);
+      }
       // Check tech time-off
       const toSnap = await db.collection(`tenants/${tid}/timeOff`).get();
       const onTimeOff = toSnap.docs.map(x => x.data()).some(t =>
@@ -5754,12 +5999,12 @@ exports.timeclockBreakReminders = onSchedule(
           newEntries.push(entry);
           continue;
         }
-        // Look up the tech's phone — entries store name only, not phone.
+        // Look up the tech's phone — entries store name only, not phone. Phone
+        // now lives in the staff-only contact subdoc (moved off the world-
+        // readable employee doc), so resolve via loadEmpContact.
         let phone = null;
-        try {
-          const eSnap = await db.doc(`tenants/${tenantId}/employees/${entry.employeeId}`).get();
-          phone = eSnap.exists ? (eSnap.data().phone || null) : null;
-        } catch (_) { /* fall through */ }
+        try { phone = (await loadEmpContact(db, tenantId, entry.employeeId)).phone || null; }
+        catch (_) { /* fall through */ }
         if (phone) {
           await sendSms({
             to:    phone,
@@ -6081,7 +6326,7 @@ exports.sendTechAppointmentReminders = onSchedule(
 
       const empSnap = await db.collection(`tenants/${tenantId}/employees`).get();
       const empByName = {};
-      empSnap.docs.forEach(d => { const e = d.data(); if (e.name) empByName[e.name] = e; });
+      await Promise.all(empSnap.docs.map(async d => { const e = { id: d.id, ...d.data() }; if (!e.name) return; Object.assign(e, await loadEmpContact(db, tenantId, d.id)); empByName[e.name] = e; }));
 
       const toSnap = await db.collection(`tenants/${tenantId}/timeOff`).get();
       const timeOffEntries = toSnap.docs.map(d => d.data())
@@ -6569,7 +6814,7 @@ exports.generateAnnual1099s = onSchedule(
     // Fetch employees for contact/tax info
     const empSnaps = await db.collection(`tenants/${TENANT_ID}/employees`).get();
     const empMap = {};
-    empSnaps.docs.forEach(d => { empMap[d.data().name] = d.data(); });
+    await Promise.all(empSnaps.docs.map(async d => { const e = { id: d.id, ...d.data() }; Object.assign(e, await loadEmpContact(db, TENANT_ID, d.id)); if (e.name) empMap[e.name] = e; }));
 
     // Fetch settings for payer info. Defaults to the tenant doc's name +
     // empty address if settings.salon* fields aren't set; if both are
@@ -8786,7 +9031,7 @@ async function notifyByRouting(db, tenantId, event, { title, line, data = {} }) 
   if (smsSet.size) {
     try {
       const emps = await db.collection(`tenants/${tenantId}/employees`).get();
-      emps.docs.forEach(d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (em && e.phone) phoneByEmail[em] = e.phone; });
+      await Promise.all(emps.docs.map(async d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (!em) return; const c = await loadEmpContact(db, tenantId, d.id); const ph = e.phone || c.phone; if (ph) phoneByEmail[em] = ph; }));
     } catch (e) { /* best-effort */ }
   }
   let alertSubject = '', alertHtml = '', fromAddr = null;
@@ -8832,7 +9077,7 @@ async function notifyTenantAdmins(db, tenantId, { title, line, data = {}, event 
   const phoneByEmail = {};
   try {
     const emps = await db.collection(`tenants/${tenantId}/employees`).get();
-    emps.docs.forEach(d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (em && e.phone) phoneByEmail[em] = e.phone; });
+    await Promise.all(emps.docs.map(async d => { const e = d.data() || {}; const em = String(e.email || '').toLowerCase(); if (!em) return; const c = await loadEmpContact(db, tenantId, d.id); const ph = e.phone || c.phone; if (ph) phoneByEmail[em] = ph; }));
   } catch (e) { /* best-effort */ }
 
   const { subject: alertSubject, html: alertHtml } = await renderTemplate(db, tenantId, 'admin_alert', {
@@ -12787,7 +13032,14 @@ async function findClientByPhone(tenantId, fromPhone) {
   if (!inboundDigits) return null;
   const last10 = inboundDigits.slice(-10);
   const db = getFirestore();
-  const all = await db.collection(`tenants/${tenantId}/clients`).get();
+  const clientsRef = db.collection(`tenants/${tenantId}/clients`);
+  // Fast path: the indexed `phoneDigits` field (last-10, written on create) —
+  // an O(1) equality lookup instead of scanning + downloading every client doc
+  // (incl. base64 photos) on every inbound SMS. Same pattern as the booking
+  // dedup path. Falls back to the full scan only for un-backfilled legacy docs.
+  const idx = await clientsRef.where('phoneDigits', '==', last10).limit(1).get().catch(() => null);
+  if (idx && !idx.empty) { const d = idx.docs[0]; return { id: d.id, ...d.data() }; }
+  const all = await clientsRef.get();
   for (const d of all.docs) {
     const phoneDigits = ((d.data().phone || '') + '').replace(/\D/g, '');
     if (phoneDigits.slice(-10) === last10) return { id: d.id, ...d.data() };
@@ -14191,7 +14443,7 @@ exports.recoverUsersFullFromBQ = onCall({ cors: true, timeoutSeconds: 30 }, asyn
   // overlay-aware so custom-role members (and managers) aren't dropped from
   // staffEmails on recovery — a static role list here would lock them out.
   const overlay = await loadCustomRoles(db, tenantId);
-  const { staffEmails, adminEmails, capEmails } = buildStaffProjection(parsed.users, overlay);
+  const { staffEmails, adminEmails, capEmails, readonlyEmails } = buildStaffProjection(parsed.users, overlay);
 
   const snapshotIso = row.timestamp?.value || String(row.timestamp);
   const batch = db.batch();
@@ -14201,7 +14453,7 @@ exports.recoverUsersFullFromBQ = onCall({ cors: true, timeoutSeconds: 30 }, asyn
     _recoveredAt:   new Date().toISOString(),
   });
   batch.set(db.doc(`tenants/${tenantId}/data/users`), {
-    staffEmails, adminEmails, capEmails,
+    staffEmails, adminEmails, capEmails, readonlyEmails,
   }, { merge: true });
   await batch.commit();
 
@@ -14874,8 +15126,25 @@ exports.provisionTenantSMS = onCall(
 // in Twilio Console at: Messaging → Compliance → Toll-Free Verification
 // → Status callback URL = `https://<region>-<project>.cloudfunctions.net/twilioStatusWebhook`.
 // Body is form-urlencoded: { TollfreeVerificationSid, Status, RejectionReason? }.
-exports.twilioStatusWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (req, res) => {
+exports.twilioStatusWebhook = onRequest({ cors: false, timeoutSeconds: 30, secrets: [twilioToken] }, async (req, res) => {
   try {
+    // Verify the POST really came from Twilio — same as twilioInboundSms. Without
+    // this, anyone who learns a TollfreeVerificationSid can forge a Status and
+    // flip a tenant's SMS-onboarding state (force 'rejected' = DoS, or a false
+    // 'approved') + spam the owner. Twilio only signs POSTs, so require POST.
+    const tokenForSig = twilioToken.value();
+    const signature   = req.headers['x-twilio-signature'];
+    if (!tokenForSig || !signature) {
+      console.warn('[twilioStatusWebhook] missing signature or auth token');
+      res.status(403).send('Forbidden'); return;
+    }
+    const fullUrl = `https://${req.get('host')}${req.originalUrl || req.url}`;
+    const valid = require('twilio').validateRequest(tokenForSig, signature, fullUrl, req.body || {});
+    if (!valid) {
+      console.warn('[twilioStatusWebhook] invalid signature; rejecting webhook');
+      res.status(403).send('Forbidden'); return;
+    }
+
     const verificationSid = String(req.body?.TollfreeVerificationSid || req.query?.TollfreeVerificationSid || '');
     const status          = String(req.body?.Status                  || req.query?.Status                  || '');
     const rejectionReason = String(req.body?.RejectionReason         || req.query?.RejectionReason         || '');
@@ -15605,12 +15874,19 @@ exports.runIntegrityScan = onSchedule(
         checks.usersFullSync = { status: 'red', error: e?.message || 'failed' };
       }
 
+      // Appointments feed BOTH checks #2 and #3 — read the collection ONCE
+      // (it's the largest per tenant) and reuse the snapshot below.
+      let apptsSnap = null, apptsErr = null;
+      try {
+        apptsSnap = await db.collection(`tenants/${tenantId}/appointments`).get();
+      } catch (e) {
+        apptsErr = e;
+      }
+
       // 2. Orphaned appointments (clientId references missing client, non-walk-in only)
       try {
-        const [apptsSnap, clientsSnap] = await Promise.all([
-          db.collection(`tenants/${tenantId}/appointments`).get(),
-          db.collection(`tenants/${tenantId}/clients`).get(),
-        ]);
+        if (apptsErr) throw apptsErr;
+        const clientsSnap = await db.collection(`tenants/${tenantId}/clients`).get();
         const clientIds = new Set(clientsSnap.docs.map(d => d.id));
         const orphans = [];
         let total = 0;
@@ -15632,11 +15908,9 @@ exports.runIntegrityScan = onSchedule(
 
       // 3. Orphaned receipts (apptIds reference missing appointments)
       try {
-        const [receiptsSnap, apptsSnap2] = await Promise.all([
-          db.collection(`tenants/${tenantId}/receipts`).get(),
-          db.collection(`tenants/${tenantId}/appointments`).get(),
-        ]);
-        const apptIdSet = new Set(apptsSnap2.docs.map(d => d.id));
+        if (apptsErr) throw apptsErr;
+        const receiptsSnap = await db.collection(`tenants/${tenantId}/receipts`).get();
+        const apptIdSet = new Set(apptsSnap.docs.map(d => d.id));
         const orphans = [];
         let total = 0;
         for (const d of receiptsSnap.docs) {
@@ -15756,6 +16030,14 @@ exports.sesEventWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (
     if (type === 'SubscriptionConfirmation') {
       const subUrl = body.SubscribeURL;
       if (!subUrl) { res.status(400).send('missing SubscribeURL'); return; }
+      // SSRF guard: SubscribeURL is attacker-controllable on a spoofed POST, so
+      // only ever fetch a genuine AWS SNS confirmation URL (https + sns.*.amazonaws.com).
+      let subHost = '';
+      try { const u = new URL(subUrl); if (u.protocol === 'https:') subHost = u.hostname; } catch { /* bad url */ }
+      if (!/^sns\.[a-z0-9-]+\.amazonaws\.com$/.test(subHost)) {
+        console.warn('[sesEventWebhook] rejected non-SNS SubscribeURL host:', subHost || '(unparseable)');
+        res.status(200).send('ignored'); return;
+      }
       // Confirm by hitting the SubscribeURL. AWS retries the
       // confirmation message if we don't, but only a few times — make
       // sure this side succeeds.
@@ -15824,6 +16106,122 @@ exports.sesEventWebhook = onRequest({ cors: false, timeoutSeconds: 30 }, async (
     console.error('[sesEventWebhook] handler crashed:', e?.message, e?.stack);
     // 200 so AWS doesn't retry-storm us on our own bug. Surfaces in logs.
     res.status(200).send('error');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// AWS End User Messaging — SMS delivery status webhook
+// ───────────────────────────────────────────────────────────────────────
+// PUBLIC endpoint (SNS → HTTPS). Needs run.invoker=allUsers. Receives carrier
+// delivery events for texts sent with the `salon-sms` config set, and records
+// the TRUE outcome per message (DELIVERED / CARRIER_BLOCKED / SPAM / …) so
+// admins can see whether a text actually reached the handset — Verizon et al.
+// silently drop A2P messages AFTER "accepting" them, invisible otherwise.
+//
+// Security posture (matches sesEventWebhook, which also trusts SNS without
+// crypto sig verification): (1) only events/confirmations bearing our exact
+// delivery TopicArn are processed; (2) EVERY Firestore write is gated behind
+// the smsOutbox/{messageId} mapping — messageIds are unguessable UUIDs we
+// generated at send time, so an event we didn't send maps to nothing and is
+// dropped. Net: no external caller can write, spoof a delivery, or attribute
+// an event to a tenant without already knowing a real messageId we minted.
+const SMS_UNDELIVERED = new Set([
+  'TEXT_CARRIER_BLOCKED', 'TEXT_BLOCKED', 'TEXT_SPAM', 'TEXT_INVALID',
+  'TEXT_UNREACHABLE', 'TEXT_CARRIER_UNREACHABLE', 'TEXT_TTL_EXPIRED', 'TEXT_DELIVERY_FAILURE',
+]);
+exports.smsDeliveryStatus = onRequest({ cors: false, timeoutSeconds: 30 }, async (req, res) => {
+  try {
+    const expectedTopic = awsSmsDeliveryTopic.value();
+    const headerType = req.headers['x-amz-sns-message-type'];
+    // SNS POSTs text/plain — Functions won't auto-parse it. Body is JSON per spec.
+    let body = req.body || {};
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = {}; } }
+    const type = headerType || body.Type;
+
+    // Spoof-gate #1: only our own delivery topic is honored.
+    if (expectedTopic && body.TopicArn && body.TopicArn !== expectedTopic) {
+      console.warn('[smsDeliveryStatus] rejected foreign TopicArn:', body.TopicArn);
+      res.status(200).send('ignored'); return;
+    }
+
+    if (type === 'SubscriptionConfirmation') {
+      if (expectedTopic && body.TopicArn !== expectedTopic) { res.status(200).send('ignored'); return; }
+      const subUrl = body.SubscribeURL;
+      if (!subUrl) { res.status(400).send('missing SubscribeURL'); return; }
+      // SSRF guard: SubscribeURL is attacker-controllable on a spoofed POST, so
+      // only ever fetch a genuine AWS SNS confirmation URL (https + sns.*.amazonaws.com).
+      let host = '';
+      try { const u = new URL(subUrl); if (u.protocol === 'https:') host = u.hostname; } catch { /* bad url */ }
+      if (!/^sns\.[a-z0-9-]+\.amazonaws\.com$/.test(host)) {
+        console.warn('[smsDeliveryStatus] rejected non-SNS SubscribeURL host:', host || '(unparseable)');
+        res.status(200).send('ignored'); return;
+      }
+      const r = await fetch(subUrl).catch(e => ({ _err: e?.message }));
+      if (r && r._err) { console.error('[smsDeliveryStatus] confirm fetch failed:', r._err); res.status(500).send('confirm failed'); return; }
+      console.log('[smsDeliveryStatus] SNS subscription confirmed');
+      res.status(200).send('subscribed'); return;
+    }
+    if (type !== 'Notification') { res.status(200).send('ignored'); return; }
+
+    const ev = typeof body.Message === 'string' ? JSON.parse(body.Message) : (body.Message || {});
+    const messageId = ev.messageId || ev.MessageId || ev.context?.messageId || null;
+    const eventType = ev.eventType || ev.messageStatus || 'UNKNOWN';
+    const reason    = ev.messageStatusDescription || ev.statusMessage || '';
+    const carrier   = ev.carrierName || '';
+    const dest      = ev.destinationPhoneNumber || ev.destination || '';
+    const isFinal   = ev.isFinal === true;
+    const ts        = ev.isoTimestamp
+      || (ev.eventTimestamp ? new Date(Number(ev.eventTimestamp)).toISOString() : new Date().toISOString());
+
+    if (!messageId) { res.status(200).send('no messageId'); return; }
+    // messageId lands in Firestore doc paths — AWS mints UUIDs, so reject
+    // anything with path separators / odd chars (defensive; also avoids a
+    // doc() throw on a crafted id).
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(messageId)) {
+      console.warn('[smsDeliveryStatus] rejected malformed messageId');
+      res.status(200).send('bad id'); return;
+    }
+
+    const db = getFirestore();
+    // Spoof-gate #2 + tenant attribution: the outbox maps this messageId to its
+    // tenant. Unknown id (never sent by us, or already TTL'd) → drop silently.
+    const out = await db.doc(`smsOutbox/${messageId}`).get().catch(() => null);
+    if (!out || !out.exists) {
+      console.log(`[smsDeliveryStatus] ${eventType} for unmapped messageId ${messageId} — dropped`);
+      res.status(200).send('unmapped'); return;
+    }
+    const { tenantId, clientId, kind } = out.data();
+    if (!tenantId) { res.status(200).send('no tenant'); return; }
+
+    const delivered = eventType === 'TEXT_DELIVERED';
+    const failed    = SMS_UNDELIVERED.has(eventType);
+    const outcome   = delivered ? 'delivered'
+      : failed ? 'failed'
+      : (eventType === 'TEXT_SUCCESSFUL' ? 'carrier_accepted' : 'pending');
+
+    await db.doc(`tenants/${tenantId}/smsDelivery/${messageId}`).set({
+      messageId, status: eventType, outcome, reason, carrier, dest,
+      clientId: clientId || null, kind: kind || null, isFinal,
+      updatedAt: ts,
+    }, { merge: true }).catch((e) => console.error('[smsDeliveryStatus] status write:', e?.message));
+
+    // Terminal event → mark the outbox finalized (a future cleanup cron can
+    // prune finalized rows; keeps the mapping table from growing unbounded).
+    if (isFinal || delivered || failed) {
+      db.doc(`smsOutbox/${messageId}`).set(
+        { finalized: true, finalStatus: eventType, finalizedAt: ts }, { merge: true }
+      ).catch(() => {});
+    }
+
+    if (failed) {
+      console.warn(`[smsDeliveryStatus] UNDELIVERED ${eventType} tenant=${tenantId} msg=${messageId} carrier=${carrier} (${reason})`);
+    } else {
+      console.log(`[smsDeliveryStatus] ${eventType} tenant=${tenantId} msg=${messageId}${reason ? ' (' + reason + ')' : ''}`);
+    }
+    res.status(200).send('ok');
+  } catch (e) {
+    console.error('[smsDeliveryStatus] handler crashed:', e?.message, e?.stack);
+    res.status(200).send('error'); // 200 so SNS doesn't retry-storm on our bug
   }
 });
 
@@ -18217,7 +18615,12 @@ async function executeTool(db, tenantId, callerEmail, sessionId, toolName, input
         patch[k] = String(input[k]).slice(0, k === 'notes' ? 1000 : 200);
       }
       if (Object.keys(patch).length === 0) return { ok: false, error: 'No allow-listed employee field supplied.' };
+      // phone/notes are contact PII — route them to the staff-only contact
+      // sub-doc, never the publicly-readable parent employee doc.
+      const aiContact = {};
+      for (const k of ['phone', 'notes']) if (k in patch) { aiContact[k] = patch[k]; delete patch[k]; }
       patch.updatedAt = new Date().toISOString();
+      if (Object.keys(aiContact).length) await ref.collection('contact').doc('info').set({ ...aiContact, updatedAt: patch.updatedAt }, { merge: true });
       await ref.set(patch, { merge: true });
       const beforeSlice = Object.fromEntries(Object.keys(patch).filter(k => k !== 'updatedAt').map(k => [k, before[k] ?? null]));
       await writeAiAuditLog(db, tenantId, { ...audit, result: 'ok', before: beforeSlice, after: patch });

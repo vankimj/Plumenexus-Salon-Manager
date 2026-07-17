@@ -4,7 +4,17 @@ import { fetchUsersFull, setUserRole } from '../../lib/firestore';
 import { auth } from '../../lib/firebase';
 import { getCustomRoles } from '../../lib/customRoles';
 import useTenantAccess from '../../hooks/useTenantAccess';
+import { setPreviewAs } from '../../lib/previewAs';
 import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
+
+// Roles an admin can PREVIEW the app as. 'tech' aliases to 'staff' in rbac, so
+// the role gating (getVisibleModules) hides exactly what that role can't see.
+const PREVIEW_ROLES = [
+  { role: 'manager',   label: 'Manager' },
+  { role: 'tech',      label: 'Nail tech' },
+  { role: 'scheduler', label: 'Front desk' },
+  { role: 'readonly',  label: 'Read-only' },
+];
 
 const ROLE_COLORS = {
   admin:     ['#eff6ff', '#2563eb'],
@@ -24,7 +34,7 @@ const ROLE_LABEL = { admin: 'Owner / admin', manager: 'Manager', scheduler: 'Fro
 // setUserRole → saveUsers, a faithful port of the web writeBatch that
 // updates data/usersFull + the rules projections atomically.
 export default function AdminUsersScreen() {
-  const { isAdmin } = useTenantAccess();
+  const { isAdmin, realIsAdmin, previewAs } = useTenantAccess();
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const [users, setUsers] = useState(null);
@@ -76,7 +86,31 @@ export default function AdminUsersScreen() {
       keyExtractor={(u, i) => (u.email || String(i))}
       contentContainerStyle={{ padding: 14 }}
       refreshControl={<RefreshControl refreshing={false} onRefresh={load} tintColor={theme.green} />}
-      ListHeaderComponent={<Text style={styles.note}>{isAdmin ? 'Tap a user to change their role.' : 'View-only.'}</Text>}
+      ListHeaderComponent={
+        <View>
+          {realIsAdmin && (
+            <View style={styles.previewBox}>
+              <Text style={styles.previewTitle}>👁  Preview as</Text>
+              <Text style={styles.previewDesc}>See exactly what a staff role sees on this device. Exit anytime from the banner up top — your real access is never changed.</Text>
+              <View style={styles.previewRow}>
+                {PREVIEW_ROLES.map(p => {
+                  const on = previewAs?.role === p.role;
+                  return (
+                    <TouchableOpacity
+                      key={p.role}
+                      style={[styles.previewChip, on && styles.previewChipOn]}
+                      onPress={() => setPreviewAs(on ? null : { role: p.role, label: p.label })}
+                    >
+                      <Text style={[styles.previewChipText, on && styles.previewChipTextOn]}>{on ? '● ' : ''}{p.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+          <Text style={styles.note}>{isAdmin ? 'Tap a user to change their role.' : 'View-only.'}</Text>
+        </View>
+      }
       ListEmptyComponent={<Text style={styles.empty}>No users found (or you lack access to the rich user list).</Text>}
       renderItem={({ item }) => {
         const [bg, c] = colorFor(item.role);
@@ -104,4 +138,12 @@ const makeStyles = (t) => StyleSheet.create({
   sub:     { fontSize: 12, color: t.textMuted, marginTop: 2 },
   badge:   { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText:{ fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
+  previewBox:   { backgroundColor: t.surface, borderRadius: 12, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: t.border },
+  previewTitle: { fontSize: 14, fontWeight: '800', color: t.text },
+  previewDesc:  { fontSize: 12, color: t.textMuted, marginTop: 4, marginBottom: 10, lineHeight: 17 },
+  previewRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  previewChip:  { borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1.5, borderColor: t.border, backgroundColor: t.bg },
+  previewChipOn:{ borderColor: '#f59e0b', backgroundColor: '#fffbeb' },
+  previewChipText:  { fontSize: 13, fontWeight: '700', color: t.text },
+  previewChipTextOn:{ color: '#b45309' },
 });

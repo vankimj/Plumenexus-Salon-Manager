@@ -16,8 +16,6 @@ import KioskLockGate from './src/components/KioskLockGate';
 import KioskRoot from './src/navigation/KioskRoot';
 import { loadInitialKioskLock, isKioskLocked, subscribeKioskLock } from './src/lib/kioskLock';
 import { ThemeProvider } from './src/theme/ThemeContext';
-import { PreviewRoleProvider } from './src/context/PreviewRoleContext';
-import PreviewBanner from './src/components/PreviewBanner';
 
 // Auto-logout — single inactivity timer at the root. Resets on any
 // gesture inside the app (touchstart bubbles up through the
@@ -110,19 +108,7 @@ export default function App() {
               ? (kioskClaim
                   ? <TerminalProvider><KioskRoot /></TerminalProvider>   // dedicated kiosk: claim-driven, never the PIN gate
                   : kioskLocked ? <KioskLockGate />
-                  : (
-                    // Normal authenticated app. PreviewRoleProvider + the
-                    // persistent PreviewBanner power the admin "Preview as role"
-                    // tool; the banner sits above the navigator so Exit is
-                    // reachable from any screen (a previewed non-admin role hides
-                    // the Admin tile that would otherwise lead back).
-                    <PreviewRoleProvider>
-                      <PreviewBanner />
-                      <View style={{ flex: 1 }}>
-                        <TerminalProvider><RootNav /></TerminalProvider>
-                      </View>
-                    </PreviewRoleProvider>
-                  ))
+                  : <TerminalProvider><RootNav /></TerminalProvider>)
               : <AuthScreen />}
           </ErrorBoundary>
         </View>

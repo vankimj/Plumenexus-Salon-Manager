@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildCapEmails } from './userProjections';
+import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildReadonlyEmails, buildCapEmails } from './userProjections';
 import { DELEGATED_RULE_CAPS, CAPS } from './rbac';
 
 const USERS = [
@@ -111,5 +111,36 @@ describe('buildScheduleViewOnlyEmails', () => {
   it('handles empty/missing input', () => {
     expect(buildScheduleViewOnlyEmails([])).toEqual([]);
     expect(buildScheduleViewOnlyEmails(undefined)).toEqual([]);
+  });
+});
+
+describe('buildReadonlyEmails', () => {
+  it('lists only readonly-role users (not staff/admin/tech/scheduler)', () => {
+    const users = [
+      { email: 'owner@x.com',  role: 'admin' },
+      { email: 'mgr@x.com',    role: 'manager' },
+      { email: 'tech@x.com',   role: 'tech' },
+      { email: 'front@x.com',  role: 'scheduler' },
+      { email: 'view@x.com',   role: 'readonly' },
+    ];
+    expect(buildReadonlyEmails(users)).toEqual(['view@x.com']);
+  });
+  it('a readonly user is STILL staff (keeps reads) but IS flagged readonly', () => {
+    const users = [{ email: 'view@x.com', role: 'readonly' }];
+    // Belongs to staffEmails (reads) AND readonlyEmails (write-blocked) — the
+    // rules compute isTenantWriter = staff && !readonly.
+    expect(buildStaffEmails(users, null)).toContain('view@x.com');
+    expect(buildReadonlyEmails(users)).toEqual(['view@x.com']);
+  });
+  it('lowercases + dedupes', () => {
+    const users = [
+      { email: 'View@Meraki.com', role: 'readonly' },
+      { email: 'view@meraki.com', role: 'readonly' },
+    ];
+    expect(buildReadonlyEmails(users)).toEqual(['view@meraki.com']);
+  });
+  it('handles empty/missing input (fail-safe → nobody readonly → today\'s behavior)', () => {
+    expect(buildReadonlyEmails([])).toEqual([]);
+    expect(buildReadonlyEmails(undefined)).toEqual([]);
   });
 });
