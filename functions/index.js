@@ -6288,8 +6288,9 @@ exports.sendRebookNudges = onSchedule(
       const targetAppts = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       if (!targetAppts.length) return;
 
-      // Clients already on the books (single-field range → no composite index).
-      const futureSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', '>', todayLocal).get();
+      // Clients already on the books — includes TODAY (>=), so someone with an
+      // appointment today isn't nudged. Single-field range → no composite index.
+      const futureSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', '>=', todayLocal).get();
       const futureIds = futureClientIdSet(futureSnap.docs.map(d => d.data()), todayLocal);
 
       const candidates = selectRebookCandidates(targetAppts, futureIds);
@@ -6305,37 +6306,65 @@ exports.sendRebookNudges = onSchedule(
       const clientMap = {};
       clientSnaps.forEach(s => { if (s.exists) clientMap[s.id] = s.data(); });
 
-      let sent = 0, blocked = 0;
-      await Promise.all(candidates.map(async appt => {
-        const client = clientMap[appt.clientId];
-        if (!client || !client.phone) return;
-        const firstName = String(client.name || appt.clientName || '').trim().split(/\s+/)[0] || 'there';
-        const svc0 = Array.isArray(appt.services) && appt.services[0]?.name ? String(appt.services[0].name) : '';
-        const { body } = await renderTemplate(db, tenantId, 'rebook_nudge_sms', {
-          clientName: firstName,
-          salonName,
-          lastServiceSuffix: svc0 ? ` since your ${svc0}` : '',
-          bookLink,
-        }, brand);
+      // Client-level eligibility. The per-appt marker isn't enough: a client with
+      // two nearby visits, or the sliding catch-up window, could re-select an
+      // un-marked sibling appt and text twice. Gate on the CLIENT instead —
+      // explicit opt-in (defense-in-depth over sendSms) + a cooldown at least as
+      // long as the nudge interval so no client is nudged twice per cycle.
+      const cooldownMs = Math.max(weeks, 3) * 7 * 86400000;
+      const nowMs = now.getTime();
+      let eligible = candidates.filter(a => {
+        const c = clientMap[a.clientId];
+        if (!c || !c.phone) return false;
+        if (c.smsOptIn !== true) return false;
+        const last = c.rebookNudgedAt ? new Date(c.rebookNudgedAt).getTime() : 0;
+        return !(last && (nowMs - last) < cooldownMs);
+      });
 
-        const r = await sendSms({ to: client.phone, body, tenantId, clientId: appt.clientId, kind: 'marketing' });
-        const mark = async (extra) => {
+      // Bound the blast: a hard per-run cap + small batches. The SMS quota
+      // transaction contends on one doc and fails OPEN under heavy concurrency,
+      // so we never fan out unbounded. Anything over the cap catches up on the
+      // next run (its cohort is still inside the 2-day window).
+      const MAX_PER_RUN = 200, BATCH = 8;
+      if (eligible.length > MAX_PER_RUN) {
+        console.warn(`[RebookNudge] tenant=${tenantId} capping ${eligible.length}->${MAX_PER_RUN}; rest catch up next run`);
+        eligible = eligible.slice(0, MAX_PER_RUN);
+      }
+
+      let sent = 0, blocked = 0;
+      for (let i = 0; i < eligible.length; i += BATCH) {
+        await Promise.all(eligible.slice(i, i + BATCH).map(async appt => {
+          const client = clientMap[appt.clientId];
+          // CLAIM before sending: stamp the client cooldown first. A duplicate
+          // marketing text is worse than a missed one, so if the send later
+          // fails transiently we accept the miss (client is eligible again next
+          // visit) rather than risk a re-text from an overlapping/retried run.
+          try {
+            await db.doc(`tenants/${tenantId}/clients/${appt.clientId}`).update({ rebookNudgedAt: new Date().toISOString() });
+          } catch (e) { console.warn('[RebookNudge] claim write failed, skipping:', e?.message); return; }
+
+          const firstName = String(client.name || appt.clientName || '').trim().split(/\s+/)[0] || 'there';
+          const svc0 = Array.isArray(appt.services) && appt.services[0]?.name ? String(appt.services[0].name) : '';
+          const { body } = await renderTemplate(db, tenantId, 'rebook_nudge_sms', {
+            clientName: firstName,
+            salonName,
+            lastServiceSuffix: svc0 ? ` since your ${svc0}` : '',
+            bookLink,
+          }, brand);
+
+          const r = await sendSms({ to: client.phone, body, tenantId, clientId: appt.clientId, kind: 'marketing' });
+          if (r.ok) sent++; else blocked++;
+          // Narrow future queries: flag the appt too (best-effort; the client
+          // cooldown is the real idempotency guard).
           try {
             await db.doc(`tenants/${tenantId}/appointments/${appt.id}`).update({
-              rebookNudgeSent: true, rebookNudgeSentAt: new Date().toISOString(), ...extra,
+              rebookNudgeSent: true, rebookNudgeSentAt: new Date().toISOString(),
+              rebookNudgeResult: r.ok ? (r.sandboxed ? 'sandboxed' : 'sent') : (r.error || 'blocked'),
             });
-          } catch (e) { console.warn('[RebookNudge] mark-sent write failed:', e?.message); }
-        };
-        if (r.ok) { sent++; await mark({ rebookNudgeSandboxed: !!r.sandboxed }); }
-        else {
-          blocked++;
-          // Opt-out / no-opt-in is permanent — mark so we stop re-querying this
-          // appt daily. Transient failures (quota, provider) are NOT marked, so
-          // they retry within the catch-up window on a later run.
-          if (r.optedOut) await mark({ rebookNudgeSkipped: r.error || 'opted_out' });
-        }
-      }));
-      console.log(`[RebookNudge] tenant=${tenantId} dates=${dates.join(',')} weeks=${weeks} candidates=${candidates.length} sent=${sent} blocked=${blocked}`);
+          } catch (_) { /* client cooldown already prevents re-send */ }
+        }));
+      }
+      console.log(`[RebookNudge] tenant=${tenantId} dates=${dates.join(',')} weeks=${weeks} eligible=${eligible.length} sent=${sent} blocked=${blocked}`);
     });
   }
 );

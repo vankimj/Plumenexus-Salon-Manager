@@ -66,15 +66,16 @@ describe('selectRebookCandidates', () => {
 });
 
 describe('futureClientIdSet', () => {
-  it('collects clientIds with a non-cancelled appt strictly after the date', () => {
+  it('collects clientIds with a non-cancelled appt on or after the date (today counts)', () => {
     const appts = [
       { clientId: 'c1', date: '2026-07-20', status: 'scheduled' },
-      { clientId: 'c2', date: '2026-07-18', status: 'scheduled' }, // == afterDate, excluded
+      { clientId: 'c2', date: '2026-07-18', status: 'scheduled' }, // == fromDate (today), INCLUDED
       { clientId: 'c3', date: '2026-07-25', status: 'cancelled' }, // cancelled, excluded
       { clientId: 'c4', date: '2026-08-01', status: 'scheduled' },
+      { clientId: 'c5', date: '2026-07-10', status: 'scheduled' }, // past, excluded
     ];
     const s = futureClientIdSet(appts, '2026-07-18');
-    expect([...s].sort()).toEqual(['c1', 'c4']);
+    expect([...s].sort()).toEqual(['c1', 'c2', 'c4']);
   });
 
   it('ignores appts with no clientId or no date', () => {

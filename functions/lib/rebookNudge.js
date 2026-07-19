@@ -30,14 +30,15 @@ function selectRebookCandidates(targetDateAppts, futureClientIds, sentField = 'r
   return out;
 }
 
-// Set of clientIds that have any non-cancelled appointment strictly after
-// `afterDate` (YYYY-MM-DD). Built from a plain array so it's testable.
-function futureClientIdSet(futureAppts, afterDate) {
+// Set of clientIds that have any non-cancelled appointment on or after
+// `fromDate` (YYYY-MM-DD) — inclusive, so a client booked for TODAY counts as
+// "on the books" and is not nudged. Built from a plain array so it's testable.
+function futureClientIdSet(futureAppts, fromDate) {
   const s = new Set();
   for (const a of futureAppts || []) {
     if (!a || !a.clientId || !a.date) continue;
     if (a.status === 'cancelled') continue;
-    if (a.date > afterDate) s.add(a.clientId);
+    if (a.date >= fromDate) s.add(a.clientId);
   }
   return s;
 }
