@@ -6335,13 +6335,22 @@ exports.sendRebookNudges = onSchedule(
       for (let i = 0; i < eligible.length; i += BATCH) {
         await Promise.all(eligible.slice(i, i + BATCH).map(async appt => {
           const client = clientMap[appt.clientId];
-          // CLAIM before sending: stamp the client cooldown first. A duplicate
-          // marketing text is worse than a missed one, so if the send later
-          // fails transiently we accept the miss (client is eligible again next
-          // visit) rather than risk a re-text from an overlapping/retried run.
-          try {
-            await db.doc(`tenants/${tenantId}/clients/${appt.clientId}`).update({ rebookNudgedAt: new Date().toISOString() });
-          } catch (e) { console.warn('[RebookNudge] claim write failed, skipping:', e?.message); return; }
+          // CLAIM before sending, as a compare-and-set TRANSACTION: re-read the
+          // client's cooldown inside the txn and abort if another (overlapping /
+          // double-fired) run already claimed it. This closes the concurrent-run
+          // race that a blind write leaves open — two runs can't both send.
+          // A duplicate marketing text is worse than a missed one, so a later
+          // send failure is accepted as a miss (client eligible again next visit).
+          const clientRef = db.doc(`tenants/${tenantId}/clients/${appt.clientId}`);
+          const claimed = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(clientRef);
+            if (!snap.exists) return false;
+            const prev = snap.data().rebookNudgedAt ? new Date(snap.data().rebookNudgedAt).getTime() : 0;
+            if (prev && (nowMs - prev) < cooldownMs) return false; // already claimed
+            tx.update(clientRef, { rebookNudgedAt: new Date().toISOString() });
+            return true;
+          }).catch((e) => { console.warn('[RebookNudge] claim txn failed, skipping:', e?.message); return false; });
+          if (!claimed) return;
 
           const firstName = String(client.name || appt.clientName || '').trim().split(/\s+/)[0] || 'there';
           const svc0 = Array.isArray(appt.services) && appt.services[0]?.name ? String(appt.services[0].name) : '';
