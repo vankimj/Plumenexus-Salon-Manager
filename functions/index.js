@@ -6279,6 +6279,28 @@ exports.sendRebookNudges = onSchedule(
       if (cfg.enabled !== true) return;                                  // opt-in only
       if (!isCustomerNotifEnabled(settings, 'rebook_nudge')) return;      // routing gate
 
+      // Canary / preview mode: when testClientId is set, text ONLY that one
+      // client — no other client can be reached — bypassing the visit-history
+      // and future-appt gates so an owner can preview the real message. Consent
+      // is still enforced (sendSms kind:'marketing' + smsOptIn), and the cooldown
+      // is NOT written, so it's repeatable for testing.
+      const testClientId = cfg.testClientId ? String(cfg.testClientId).trim() : '';
+      if (testClientId) {
+        const cSnap = await db.doc(`tenants/${tenantId}/clients/${testClientId}`).get();
+        const tc = cSnap.exists ? cSnap.data() : null;
+        if (!tc || !tc.phone) { console.warn(`[RebookNudge] TEST client ${testClientId} missing or no phone`); return; }
+        const tBrand   = await tenantBranding(db, tenantId);
+        const tBaseUrl = (await tenantBaseUrl(db, tenantId)) || '';
+        const tBook    = settings.bookingUrl || (tBaseUrl ? `${tBaseUrl.replace(/\/+$/, '')}/book` : 'https://plumenexus.com');
+        const tFirst   = String(tc.name || '').trim().split(/\s+/)[0] || 'there';
+        const { body } = await renderTemplate(db, tenantId, 'rebook_nudge_sms', {
+          clientName: tFirst, salonName: String(tBrand?.salonName || '').trim(), lastServiceSuffix: '', bookLink: tBook,
+        }, tBrand);
+        const tr = await sendSms({ to: tc.phone, body, tenantId, clientId: testClientId, kind: 'marketing' });
+        console.log(`[RebookNudge] TEST tenant=${tenantId} client=${testClientId} ok=${tr.ok} sandboxed=${!!tr.sandboxed} err=${tr.error || ''}`);
+        return;
+      }
+
       const weeks = Number(cfg.weeks) > 0 ? Math.floor(Number(cfg.weeks)) : 4;
       const tz = resolveTimezone(settings);
       const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
