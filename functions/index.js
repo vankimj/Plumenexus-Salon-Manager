@@ -15,6 +15,7 @@ const crypto               = require('crypto');
 const usageLog             = require('./lib/usage');
 const { roleCan, normalizeRole, resolveRoleCaps, sanitizeCaps, roleExists, CAPS, ROLES, OWNER_ONLY, DELEGATED_RULE_CAPS } = require('./lib/rbac');
 const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notificationRouting');
+const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -6255,6 +6256,86 @@ exports.sendUpcomingReminders = onSchedule(
       }));
 
       console.log(`[Reminders2] tenant=${tenantId} email=${sent} sms=${smsSent} lead=${lead}h`);
+    });
+  }
+);
+
+// ── Auto-rebook nudge (re-engagement SMS) ──────────────
+// Once a day, text past clients whose last visit was ~`weeks` weeks ago and who
+// have no upcoming appointment: "ready for your next visit?" This is a MARKETING
+// message, so it goes out only through sendSms(kind:'marketing'), which fails
+// closed without explicit smsOptIn and honors opt-out + STOP + quota + sandbox.
+// Off by default (settings.rebookNudge.enabled must be true). A per-appt
+// rebookNudgeSent marker makes runs idempotent and prevents re-nudging.
+exports.sendRebookNudges = onSchedule(
+  { schedule: 'every day 15:00', timeZone: 'America/New_York' },
+  async () => {
+    const now = new Date();
+    await forEachActiveTenant('RebookNudge', async (tenantId) => {
+      const db = getFirestore();
+      const sSnap = await db.doc(`tenants/${tenantId}/data/settings`).get();
+      const settings = sSnap.exists ? sSnap.data() : {};
+      const cfg = settings.rebookNudge || {};
+      if (cfg.enabled !== true) return;                                  // opt-in only
+      if (!isCustomerNotifEnabled(settings, 'rebook_nudge')) return;      // routing gate
+
+      const weeks = Number(cfg.weeks) > 0 ? Math.floor(Number(cfg.weeks)) : 4;
+      const tz = resolveTimezone(settings);
+      const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+      const dates = rebookTargetDates(todayLocal, weeks); // target week-offset + 2-day catch-up
+
+      const targetSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', 'in', dates).get();
+      const targetAppts = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!targetAppts.length) return;
+
+      // Clients already on the books (single-field range → no composite index).
+      const futureSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', '>', todayLocal).get();
+      const futureIds = futureClientIdSet(futureSnap.docs.map(d => d.data()), todayLocal);
+
+      const candidates = selectRebookCandidates(targetAppts, futureIds);
+      if (!candidates.length) return;
+
+      const brand     = await tenantBranding(db, tenantId);
+      const baseUrl   = (await tenantBaseUrl(db, tenantId)) || '';
+      const bookLink  = (settings.bookingUrl) || (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/book` : 'https://plumenexus.com');
+      const salonName = String(brand?.salonName || '').trim();
+
+      const clientIds = [...new Set(candidates.map(a => a.clientId))];
+      const clientSnaps = await Promise.all(clientIds.map(id => db.doc(`tenants/${tenantId}/clients/${id}`).get()));
+      const clientMap = {};
+      clientSnaps.forEach(s => { if (s.exists) clientMap[s.id] = s.data(); });
+
+      let sent = 0, blocked = 0;
+      await Promise.all(candidates.map(async appt => {
+        const client = clientMap[appt.clientId];
+        if (!client || !client.phone) return;
+        const firstName = String(client.name || appt.clientName || '').trim().split(/\s+/)[0] || 'there';
+        const svc0 = Array.isArray(appt.services) && appt.services[0]?.name ? String(appt.services[0].name) : '';
+        const { body } = await renderTemplate(db, tenantId, 'rebook_nudge_sms', {
+          clientName: firstName,
+          salonName,
+          lastServiceSuffix: svc0 ? ` since your ${svc0}` : '',
+          bookLink,
+        }, brand);
+
+        const r = await sendSms({ to: client.phone, body, tenantId, clientId: appt.clientId, kind: 'marketing' });
+        const mark = async (extra) => {
+          try {
+            await db.doc(`tenants/${tenantId}/appointments/${appt.id}`).update({
+              rebookNudgeSent: true, rebookNudgeSentAt: new Date().toISOString(), ...extra,
+            });
+          } catch (e) { console.warn('[RebookNudge] mark-sent write failed:', e?.message); }
+        };
+        if (r.ok) { sent++; await mark({ rebookNudgeSandboxed: !!r.sandboxed }); }
+        else {
+          blocked++;
+          // Opt-out / no-opt-in is permanent — mark so we stop re-querying this
+          // appt daily. Transient failures (quota, provider) are NOT marked, so
+          // they retry within the catch-up window on a later run.
+          if (r.optedOut) await mark({ rebookNudgeSkipped: r.error || 'opted_out' });
+        }
+      }));
+      console.log(`[RebookNudge] tenant=${tenantId} dates=${dates.join(',')} weeks=${weeks} candidates=${candidates.length} sent=${sent} blocked=${blocked}`);
     });
   }
 );
