@@ -15,6 +15,7 @@ const crypto               = require('crypto');
 const usageLog             = require('./lib/usage');
 const { roleCan, normalizeRole, resolveRoleCaps, sanitizeCaps, roleExists, CAPS, ROLES, OWNER_ONLY, DELEGATED_RULE_CAPS } = require('./lib/rbac');
 const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notificationRouting');
+const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -6255,6 +6256,124 @@ exports.sendUpcomingReminders = onSchedule(
       }));
 
       console.log(`[Reminders2] tenant=${tenantId} email=${sent} sms=${smsSent} lead=${lead}h`);
+    });
+  }
+);
+
+// ── Auto-rebook nudge (re-engagement SMS) ──────────────
+// Once a day, text past clients whose last visit was ~`weeks` weeks ago and who
+// have no upcoming appointment: "ready for your next visit?" This is a MARKETING
+// message, so it goes out only through sendSms(kind:'marketing'), which fails
+// closed without explicit smsOptIn and honors opt-out + STOP + quota + sandbox.
+// Off by default (settings.rebookNudge.enabled must be true). A per-appt
+// rebookNudgeSent marker makes runs idempotent and prevents re-nudging.
+exports.sendRebookNudges = onSchedule(
+  { schedule: 'every day 15:00', timeZone: 'America/New_York' },
+  async () => {
+    const now = new Date();
+    await forEachActiveTenant('RebookNudge', async (tenantId) => {
+      const db = getFirestore();
+      const sSnap = await db.doc(`tenants/${tenantId}/data/settings`).get();
+      const settings = sSnap.exists ? sSnap.data() : {};
+      const cfg = settings.rebookNudge || {};
+      if (cfg.enabled !== true) return;                                  // opt-in only
+      if (!isCustomerNotifEnabled(settings, 'rebook_nudge')) return;      // routing gate
+
+      const weeks = Number(cfg.weeks) > 0 ? Math.floor(Number(cfg.weeks)) : 4;
+      const tz = resolveTimezone(settings);
+      const todayLocal = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+      const dates = rebookTargetDates(todayLocal, weeks); // target week-offset + 2-day catch-up
+
+      const targetSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', 'in', dates).get();
+      const targetAppts = targetSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!targetAppts.length) return;
+
+      // Clients already on the books — includes TODAY (>=), so someone with an
+      // appointment today isn't nudged. Single-field range → no composite index.
+      const futureSnap = await db.collection(`tenants/${tenantId}/appointments`).where('date', '>=', todayLocal).get();
+      const futureIds = futureClientIdSet(futureSnap.docs.map(d => d.data()), todayLocal);
+
+      const candidates = selectRebookCandidates(targetAppts, futureIds);
+      if (!candidates.length) return;
+
+      const brand     = await tenantBranding(db, tenantId);
+      const baseUrl   = (await tenantBaseUrl(db, tenantId)) || '';
+      const bookLink  = (settings.bookingUrl) || (baseUrl ? `${baseUrl.replace(/\/+$/, '')}/book` : 'https://plumenexus.com');
+      const salonName = String(brand?.salonName || '').trim();
+
+      const clientIds = [...new Set(candidates.map(a => a.clientId))];
+      const clientSnaps = await Promise.all(clientIds.map(id => db.doc(`tenants/${tenantId}/clients/${id}`).get()));
+      const clientMap = {};
+      clientSnaps.forEach(s => { if (s.exists) clientMap[s.id] = s.data(); });
+
+      // Client-level eligibility. The per-appt marker isn't enough: a client with
+      // two nearby visits, or the sliding catch-up window, could re-select an
+      // un-marked sibling appt and text twice. Gate on the CLIENT instead —
+      // explicit opt-in (defense-in-depth over sendSms) + a cooldown at least as
+      // long as the nudge interval so no client is nudged twice per cycle.
+      const cooldownMs = Math.max(weeks, 3) * 7 * 86400000;
+      const nowMs = now.getTime();
+      let eligible = candidates.filter(a => {
+        const c = clientMap[a.clientId];
+        if (!c || !c.phone) return false;
+        if (c.smsOptIn !== true) return false;
+        const last = c.rebookNudgedAt ? new Date(c.rebookNudgedAt).getTime() : 0;
+        return !(last && (nowMs - last) < cooldownMs);
+      });
+
+      // Bound the blast: a hard per-run cap + small batches. The SMS quota
+      // transaction contends on one doc and fails OPEN under heavy concurrency,
+      // so we never fan out unbounded. Anything over the cap catches up on the
+      // next run (its cohort is still inside the 2-day window).
+      const MAX_PER_RUN = 200, BATCH = 8;
+      if (eligible.length > MAX_PER_RUN) {
+        console.warn(`[RebookNudge] tenant=${tenantId} capping ${eligible.length}->${MAX_PER_RUN}; rest catch up next run`);
+        eligible = eligible.slice(0, MAX_PER_RUN);
+      }
+
+      let sent = 0, blocked = 0;
+      for (let i = 0; i < eligible.length; i += BATCH) {
+        await Promise.all(eligible.slice(i, i + BATCH).map(async appt => {
+          const client = clientMap[appt.clientId];
+          // CLAIM before sending, as a compare-and-set TRANSACTION: re-read the
+          // client's cooldown inside the txn and abort if another (overlapping /
+          // double-fired) run already claimed it. This closes the concurrent-run
+          // race that a blind write leaves open — two runs can't both send.
+          // A duplicate marketing text is worse than a missed one, so a later
+          // send failure is accepted as a miss (client eligible again next visit).
+          const clientRef = db.doc(`tenants/${tenantId}/clients/${appt.clientId}`);
+          const claimed = await db.runTransaction(async (tx) => {
+            const snap = await tx.get(clientRef);
+            if (!snap.exists) return false;
+            const prev = snap.data().rebookNudgedAt ? new Date(snap.data().rebookNudgedAt).getTime() : 0;
+            if (prev && (nowMs - prev) < cooldownMs) return false; // already claimed
+            tx.update(clientRef, { rebookNudgedAt: new Date().toISOString() });
+            return true;
+          }).catch((e) => { console.warn('[RebookNudge] claim txn failed, skipping:', e?.message); return false; });
+          if (!claimed) return;
+
+          const firstName = String(client.name || appt.clientName || '').trim().split(/\s+/)[0] || 'there';
+          const svc0 = Array.isArray(appt.services) && appt.services[0]?.name ? String(appt.services[0].name) : '';
+          const { body } = await renderTemplate(db, tenantId, 'rebook_nudge_sms', {
+            clientName: firstName,
+            salonName,
+            lastServiceSuffix: svc0 ? ` since your ${svc0}` : '',
+            bookLink,
+          }, brand);
+
+          const r = await sendSms({ to: client.phone, body, tenantId, clientId: appt.clientId, kind: 'marketing' });
+          if (r.ok) sent++; else blocked++;
+          // Narrow future queries: flag the appt too (best-effort; the client
+          // cooldown is the real idempotency guard).
+          try {
+            await db.doc(`tenants/${tenantId}/appointments/${appt.id}`).update({
+              rebookNudgeSent: true, rebookNudgeSentAt: new Date().toISOString(),
+              rebookNudgeResult: r.ok ? (r.sandboxed ? 'sandboxed' : 'sent') : (r.error || 'blocked'),
+            });
+          } catch (_) { /* client cooldown already prevents re-send */ }
+        }));
+      }
+      console.log(`[RebookNudge] tenant=${tenantId} dates=${dates.join(',')} weeks=${weeks} eligible=${eligible.length} sent=${sent} blocked=${blocked}`);
     });
   }
 );

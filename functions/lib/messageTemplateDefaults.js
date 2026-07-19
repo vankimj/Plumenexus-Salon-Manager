@@ -279,6 +279,14 @@ It's been a while since your last visit, and we genuinely miss you! We have exci
     },
   },
 
+  rebook_nudge_sms: {
+    channel: 'sms', group: 'customer_sms',
+    label: 'Rebook reminder',
+    description: 'Texted to a past client a few weeks after their visit when they have no upcoming appointment. Marketing message — only sent to clients who opted in to texts.',
+    body: '{salonName}: Hi {clientName}! It\'s been a few weeks{lastServiceSuffix} — ready for your next visit? Book anytime: {bookLink}',
+    vars: ['clientName', 'salonName', 'lastServiceSuffix', 'bookLink'],
+  },
+
   // ── Admin alerts (emailed to salon admins) ─────────────────────────
   admin_new_booking: {
     channel: 'email', group: 'admin_alert',
