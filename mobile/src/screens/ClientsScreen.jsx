@@ -5,6 +5,7 @@ import { fetchClients } from '../lib/firestore';
 import useTenantAccess from '../hooks/useTenantAccess';
 import useTrashHeader from '../hooks/useTrashHeader';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
+import useResponsive from '../hooks/useResponsive';
 
 const ClientRow = memo(function ClientRow({ client: c, styles, onPress }) {
   const handlePress = useCallback(() => onPress(c.id, c.name), [onPress, c.id, c.name]);
@@ -37,6 +38,7 @@ const ClientRow = memo(function ClientRow({ client: c, styles, onPress }) {
 export default function ClientsScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const { contentMaxWidth } = useResponsive();
   const { isAdmin } = useTenantAccess();
   useTrashHeader(navigation, ['clients'], isAdmin);
   const [clients, setClients] = useState([]);
@@ -92,7 +94,7 @@ export default function ClientsScreen({ navigation }) {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, contentMaxWidth && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }]}>
       <View style={styles.searchRow}>
         <TextInput
           value={query}

@@ -17,10 +17,12 @@ import { BUILD_LABEL } from '../lib/version';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
 import useMyTenants from '../hooks/useMyTenants';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
+import useResponsive from '../hooks/useResponsive';
 
 export default function ProfileScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const { contentMaxWidth } = useResponsive();
   const user = auth.currentUser;
   const { employee, loading: empLoading } = useCurrentEmployee();
   const { tenants, current: currentTenant, switchTo, loading: tenantsLoading } = useMyTenants();
@@ -415,7 +417,7 @@ export default function ProfileScreen({ navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={88}
     >
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.container} contentContainerStyle={[styles.content, contentMaxWidth && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }]}>
         {/* Identity card */}
         <View style={styles.identity}>
           <TouchableOpacity

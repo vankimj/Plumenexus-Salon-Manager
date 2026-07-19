@@ -5,6 +5,7 @@ import useCurrentEmployee from '../hooks/useCurrentEmployee';
 import EarningsPanel from '../components/EarningsPanel';
 import Icon from '../components/Icon';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
+import useResponsive from '../hooks/useResponsive';
 
 const WEEK_DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -19,6 +20,7 @@ const ACTIVE = (s) => !['done', 'completed', 'cancelled', 'canceled', 'no-show',
 export default function DashboardScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
+  const { contentMaxWidth } = useResponsive();
   const { employee, techName, loading: empLoading } = useCurrentEmployee();
   const [appts, setAppts] = useState(null);     // upcoming, active, mine
   const [durByName, setDurByName] = useState({});
@@ -63,7 +65,7 @@ export default function DashboardScreen({ navigation }) {
   const shown = showAll ? appts : appts.slice(0, 3);
 
   return (
-    <ScrollView style={styles.wrap} contentContainerStyle={styles.content}
+    <ScrollView style={styles.wrap} contentContainerStyle={[styles.content, contentMaxWidth && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={theme.blue} />}>
 
       {/* Profile button — prominent, centered */}

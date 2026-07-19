@@ -19,7 +19,7 @@
       "iosDisplayInForeground": true
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "bundleIdentifier": "com.plumenexus.salon",
       "usesAppleSignIn": true,
       "infoPlist": {

@@ -7,6 +7,7 @@ import { fetchClient, saveClient, fetchClientAppointments, adjustClientCredit } 
 import Icon from '../components/Icon';
 import useTenantAccess from '../hooks/useTenantAccess';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
+import useResponsive from '../hooks/useResponsive';
 
 const TABS = [
   { id: 'profile', label: 'Profile' },
@@ -30,6 +31,7 @@ export default function ClientDetailScreen({ route, navigation }) {
   const [tab,     setTab]     = useState('profile');
   const [visits,  setVisits]  = useState([]);
   const styles = useThemedStyles(makeStyles);
+  const { contentMaxWidth } = useResponsive();
   const { theme } = useTheme();
   const { isAdmin, role, techName } = useTenantAccess();
   const canAdjust = isAdmin || role === 'tech' || !!techName;
@@ -158,7 +160,7 @@ export default function ClientDetailScreen({ route, navigation }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={88}
     >
-      <View style={styles.container}>
+      <View style={[styles.container, contentMaxWidth && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }]}>
         {/* Avatar + name header */}
         <View style={styles.identity}>
           {client.picture
