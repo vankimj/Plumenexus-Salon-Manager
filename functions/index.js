@@ -2,7 +2,7 @@ const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('fir
 const { onSchedule }       = require('firebase-functions/v2/scheduler');
 const { onCall, onRequest, HttpsError }= require('firebase-functions/v2/https');
 const { initializeApp }    = require('firebase-admin/app');
-const { getFirestore }     = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth }          = require('firebase-admin/auth');
 const { defineString, defineSecret } = require('firebase-functions/params');
 // Lazy-load the heaviest SDKs so they aren't parsed for every one of the ~176
@@ -16,6 +16,7 @@ const usageLog             = require('./lib/usage');
 const { roleCan, normalizeRole, resolveRoleCaps, sanitizeCaps, roleExists, CAPS, ROLES, OWNER_ONLY, DELEGATED_RULE_CAPS } = require('./lib/rbac');
 const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notificationRouting');
 const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
+const phoneAuth = require('./lib/phoneAuth');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -4605,6 +4606,161 @@ exports.revokeKioskLogin = onCall({ cors: true }, async (request) => {
     devices: { [kid]: { revoked: true, revokedAt: new Date().toISOString() } },
   }, { merge: true });
   return { ok: true };
+});
+
+// ── Staff phone sign-in (SMS OTP → custom token) ──────────────────────────────
+// Lets staff sign in with a phone number they LINKED while already authenticated.
+// The link binds phone → their existing uid, so the minted custom token inherits
+// their email-based authorization (staffEmails) — no phone is ever trusted from
+// an admin-typed employee record, and Firestore rules stay email-keyed.
+//
+//   requestPhoneOtp  — texts a 6-digit code (our AWS SMS, not sandbox-gated).
+//                      Unauthenticated = sign-in intent (sends only if the phone
+//                      is linked; silent otherwise to prevent enumeration).
+//                      Authenticated   = link intent (sends to the caller's phone).
+//   verifyPhoneOtp   — authenticated → LINK phone↔uid; unauthenticated → SIGN IN
+//                      (mint a custom token for the linked uid).
+//   unlinkPhoneSignin— remove the caller's phone link.
+//
+// Server-only collections (locked in firestore.rules): phoneAuthOtp,
+// phoneAuthIndex (phone→uid), phoneAuthByUid (uid→phone, for unlink), and
+// serverConfig/phoneOtp (the hashing pepper).
+
+async function _otpPepper(db) {
+  const ref = db.doc('serverConfig/phoneOtp');
+  const snap = await ref.get();
+  if (snap.exists && snap.data()?.pepper) return snap.data().pepper;
+  const pepper = crypto.randomBytes(32).toString('hex');
+  // create-if-absent so concurrent cold starts don't clobber each other
+  try { await ref.create({ pepper, createdAt: new Date().toISOString() }); return pepper; }
+  catch { return (await ref.get()).data()?.pepper; }
+}
+
+exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
+  const phone = normalizePhone(String(request.data?.phone || ''));
+  if (!phone) throw new HttpsError('invalid-argument', 'Enter a valid US mobile number.');
+  const db = getFirestore();
+  const key = phoneAuth.phoneDocKey(phone);
+  const authed = !!request.auth;
+
+  // Sign-in intent from an unauthenticated caller: only proceed if this phone is
+  // actually linked to an account. Return ok regardless so a caller can't probe
+  // which numbers are staff.
+  if (!authed) {
+    const idx = await db.doc(`phoneAuthIndex/${key}`).get();
+    if (!idx.exists) return { ok: true };
+  } else if (!request.auth.token?.email) {
+    // Link intent requires an email account so phone sign-in inherits authz.
+    throw new HttpsError('failed-precondition', 'Add an email to your account before linking a phone.');
+  }
+
+  const otpRef = db.doc(`phoneAuthOtp/${key}`);
+  const cur = (await otpRef.get()).data() || null;
+  const now = Date.now();
+  const gate = phoneAuth.canSendOtp(cur, now);
+  if (!gate.allowed) {
+    throw new HttpsError('resource-exhausted',
+      gate.reason === 'too_soon' ? 'Please wait a few seconds before requesting another code.'
+                                 : 'Too many code requests. Try again later.',
+      { retryAfterMs: gate.retryAfterMs });
+  }
+
+  const code = phoneAuth.generateOtpCode();
+  const pepper = await _otpPepper(db);
+  await otpRef.set({
+    codeHash:  phoneAuth.hashOtp(code, phone, pepper),
+    expiresAt: new Date(now + phoneAuth.OTP_TTL_MS).toISOString(),
+    attempts:  0,
+    consumedAt: FieldValue.delete(),
+    purpose:   authed ? 'link' : 'signin',
+    ...phoneAuth.nextSendAccounting(cur, now),
+    updatedAt: new Date(now).toISOString(),
+  }, { merge: true });
+
+  const r = await sendPlatformSms({ to: phone, body: `Your Plume Nexus code is ${code}. It expires in 10 minutes. Don't share it with anyone.` });
+  if (!r.ok) {
+    console.error('[requestPhoneOtp] send failed:', r.error);
+    throw new HttpsError('unavailable', "Couldn't send the code. Try again in a moment.");
+  }
+  return { ok: true };
+});
+
+exports.verifyPhoneOtp = onCall({ cors: true }, async (request) => {
+  const phone = normalizePhone(String(request.data?.phone || ''));
+  const code  = String(request.data?.code || '').replace(/\D/g, '');
+  if (!phone) throw new HttpsError('invalid-argument', 'Enter a valid US mobile number.');
+  if (code.length !== phoneAuth.OTP_CODE_LEN) throw new HttpsError('invalid-argument', 'Enter the 6-digit code.');
+
+  const db = getFirestore();
+  const key = phoneAuth.phoneDocKey(phone);
+  const otpRef = db.doc(`phoneAuthOtp/${key}`);
+  const rec = (await otpRef.get()).data() || null;
+  const pepper = await _otpPepper(db);
+  const now = Date.now();
+
+  const res = phoneAuth.evaluateOtp(rec, code, phone, pepper, now);
+  if (!res.ok) {
+    if (res.reason === 'bad_code') {
+      await otpRef.set({ attempts: (Number(rec?.attempts) || 0) + 1 }, { merge: true });
+      throw new HttpsError('permission-denied',
+        res.attemptsLeft > 0 ? `Incorrect code. ${res.attemptsLeft} attempt${res.attemptsLeft === 1 ? '' : 's'} left.` : 'Too many incorrect attempts. Request a new code.',
+        { attemptsLeft: res.attemptsLeft });
+    }
+    const msg = res.reason === 'expired' ? 'That code expired. Request a new one.'
+      : res.reason === 'locked' || res.reason === 'already_used' ? 'That code is no longer valid. Request a new one.'
+      : 'Request a code first.';
+    throw new HttpsError('permission-denied', msg);
+  }
+
+  // Consume the code (single-use) before doing anything else.
+  await otpRef.set({ consumedAt: new Date(now).toISOString() }, { merge: true });
+
+  // LINK: an authenticated caller is binding this phone to their own account.
+  if (request.auth) {
+    const uid = request.auth.uid;
+    const email = String(request.auth.token?.email || '').toLowerCase();
+    if (!email) throw new HttpsError('failed-precondition', 'Add an email to your account before linking a phone.');
+    const idxRef = db.doc(`phoneAuthIndex/${key}`);
+    const existing = (await idxRef.get()).data();
+    if (existing && existing.uid && existing.uid !== uid) {
+      throw new HttpsError('already-exists', 'That number is already linked to another account.');
+    }
+    // One phone per account: clear any previous phone this uid had linked.
+    const byUid = (await db.doc(`phoneAuthByUid/${uid}`).get()).data();
+    if (byUid?.phoneKey && byUid.phoneKey !== key) {
+      await db.doc(`phoneAuthIndex/${byUid.phoneKey}`).delete().catch(() => {});
+    }
+    const at = new Date(now).toISOString();
+    await Promise.all([
+      idxRef.set({ uid, email, linkedAt: at }, { merge: true }),
+      db.doc(`phoneAuthByUid/${uid}`).set({ phoneKey: key, phoneE164: phone, linkedAt: at }, { merge: true }),
+    ]);
+    return { ok: true, linked: true, phone };
+  }
+
+  // SIGN IN: resolve the linked account and mint a custom token for THAT uid, so
+  // the session carries their email → existing staffEmails authorization applies.
+  const idx = (await db.doc(`phoneAuthIndex/${key}`).get()).data();
+  if (!idx?.uid) throw new HttpsError('not-found', 'This number isn\'t set up for sign-in. Sign in another way and add it in your profile.');
+  let user;
+  try { user = await getAuth().getUser(idx.uid); }
+  catch { throw new HttpsError('not-found', 'That account no longer exists.'); }
+  if (user.disabled) throw new HttpsError('permission-denied', 'That account is disabled.');
+  const token = await getAuth().createCustomToken(idx.uid);
+  return { ok: true, token };
+});
+
+exports.unlinkPhoneSignin = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const db = getFirestore();
+  const uid = request.auth.uid;
+  const byUid = (await db.doc(`phoneAuthByUid/${uid}`).get()).data();
+  if (!byUid?.phoneKey) return { ok: true, unlinked: false };
+  await Promise.all([
+    db.doc(`phoneAuthIndex/${byUid.phoneKey}`).delete().catch(() => {}),
+    db.doc(`phoneAuthByUid/${uid}`).delete().catch(() => {}),
+  ]);
+  return { ok: true, unlinked: true };
 });
 
 // RBAC #8 — the server-funnel for kiosk sales. A dedicated kiosk identity has NO
