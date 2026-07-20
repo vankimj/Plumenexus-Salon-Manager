@@ -4,9 +4,9 @@ import {
   orderBy, where, query, limit,
   onSnapshot, arrayUnion, increment, writeBatch,
 } from 'firebase/firestore';
-import { db, callFn } from './firebase';
+import { db, callFn, auth } from './firebase';
 import { TENANT_ID } from './tenant';
-import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildCapEmails } from './userProjections';
+import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildReadonlyEmails, buildCapEmails } from './userProjections';
 import { getCustomRoles } from './customRoles';
 import { rosterDocId, appointmentInLocation } from './locations';
 
@@ -83,6 +83,7 @@ const SOFT_DELETED_COLLECTIONS = [
   { key: 'programTemplates',col: () => PROGRAM_TEMPLATES_COL,restorable: false },
   { key: 'clientPrograms',  col: () => CLIENT_PROGRAMS_COL,  restorable: false },
   { key: 'sessionPacks',    col: () => SESSION_PACKS_COL,    restorable: false },
+  { key: 'storeProducts',   col: () => STORE_PRODUCTS_COL,   restorable: false },
 ];
 export async function fetchRecentlyDeleted({ maxPerCollection = 50, collections = null } = {}) {
   // `collections` (optional) scopes the scan to specific collection keys —
@@ -310,6 +311,7 @@ export async function ensureStaffEmailsBackfill(users) {
       staffEmails: buildStaffEmails(users, overlay),
       adminEmails: buildAdminEmails(users, overlay),
       scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+      readonlyEmails: buildReadonlyEmails(users),
       capEmails:   buildCapEmails(users, overlay),
     }, { merge: true });
     batch.set(USERS_FULL_REF, { users }, { merge: true });
@@ -360,6 +362,7 @@ export const saveUsers = async (users) => {
     staffEmails: buildStaffEmails(users, overlay),
     adminEmails: buildAdminEmails(users, overlay),
     scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+    readonlyEmails: buildReadonlyEmails(users),
     capEmails:   buildCapEmails(users, overlay),
   }, { merge: true });
   batch.set(USERS_FULL_REF, { users }, { merge: true });
@@ -671,24 +674,50 @@ const PRIVATE_EMP_FIELDS = [
 ];
 const empPrivateRef = (id) => doc(EMPLOYEES_COL, id, 'private', 'comp');
 
+// Contact PII moved off the PUBLICLY-READABLE parent employee doc into the
+// staff-only sub-doc employees/{id}/contact/info (rules: read=staff,
+// write=writer). The parent stays public for the booking page (name / photo /
+// socials / services). `email` intentionally stays on the parent — it is the
+// account/login join-key matched across the app + a where('email') query.
+const CONTACT_EMP_FIELDS = ['phone', 'address', 'city', 'state', 'zip', 'notes'];
+const empContactRef = (id) => doc(EMPLOYEES_COL, id, 'contact', 'info');
+
 function splitEmployeeFields(data) {
   const publicFields = { ...data };
   const privateFields = {};
+  const contactFields = {};
   for (const k of PRIVATE_EMP_FIELDS) {
     if (k in publicFields) {
       privateFields[k] = publicFields[k];
       delete publicFields[k];
     }
   }
-  return { publicFields, privateFields };
+  for (const k of CONTACT_EMP_FIELDS) {
+    if (k in publicFields) {
+      contactFields[k] = publicFields[k];
+      delete publicFields[k];
+    }
+  }
+  return { publicFields, privateFields, contactFields };
 }
 
 export async function fetchEmployees() {
-  // Public read path. Returns only the public slice (parent doc only).
-  // Booking page, schedule, walk-in kiosk all use this — they don't need
-  // comp data. Compensation views call fetchEmployeesWithComp instead.
+  // The parent doc is world-readable (booking page needs name/photo/socials/
+  // services). Contact PII lives in the staff-only employees/{id}/contact/info
+  // sub-doc — merge it back ONLY for an authenticated caller. Unauthenticated
+  // public callers (webfront, booking) skip the merge entirely: no wasted
+  // reads, and the sub-doc read would be denied anyway. A signed-in booking
+  // CLIENT is authenticated but not staff — their merge attempt is denied by
+  // rules and swallowed, so they still receive no contact PII.
   const snap = await getDocs(query(EMPLOYEES_COL, orderBy('sortOrder')));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
+  const list = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
+  if (auth.currentUser) {
+    await Promise.all(list.map(async emp => {
+      try { const c = await getDoc(empContactRef(emp.id)); if (c.exists()) Object.assign(emp, c.data()); }
+      catch (_) { /* not tenant staff — leave contact fields absent */ }
+    }));
+  }
+  return list;
 }
 
 // Admin-only. Fetches the public doc + the private/comp sub-doc per
@@ -703,42 +732,53 @@ export async function fetchEmployeesWithComp() {
       const compSnap = await getDoc(empPrivateRef(emp.id));
       if (compSnap.exists()) Object.assign(emp, compSnap.data());
     } catch (_) { /* non-admin caller — leave the merge empty */ }
+    try {
+      const contactSnap = await getDoc(empContactRef(emp.id));
+      if (contactSnap.exists()) Object.assign(emp, contactSnap.data());
+    } catch (_) { /* non-staff caller — leave contact fields absent */ }
   }));
   return list;
 }
 
 export async function saveEmployee(id, data) {
   const targetId = id || doc(EMPLOYEES_COL).id;
-  const { publicFields, privateFields } = splitEmployeeFields(data);
+  const { publicFields, privateFields, contactFields } = splitEmployeeFields(data);
   const ref = doc(EMPLOYEES_COL, targetId);
   const now = new Date().toISOString();
-  // Atomic two-doc write via writeBatch — either BOTH the public-doc
-  // purge AND the private-doc set commit, or neither. Without this, a
-  // partial failure (transient permission-denied, network blip) could
-  // leave legacy sensitive fields stranded on the publicly-readable
-  // parent doc until the next successful save.
+  // Atomic multi-doc write via writeBatch — the public-doc purge AND the
+  // private/comp + contact sub-doc sets all commit, or none do. Without this,
+  // a partial failure (transient permission-denied, network blip) could
+  // leave sensitive fields stranded on the publicly-readable parent doc
+  // until the next successful save.
   const purgeMarkers = {};
   for (const k of PRIVATE_EMP_FIELDS) purgeMarkers[k] = deleteField();
+  for (const k of CONTACT_EMP_FIELDS) purgeMarkers[k] = deleteField();
   const batch = writeBatch(db);
   batch.set(ref, { ...purgeMarkers, ...publicFields, updatedAt: now }, { merge: true });
   if (Object.keys(privateFields).length) {
     batch.set(empPrivateRef(targetId), { ...privateFields, updatedAt: now }, { merge: true });
+  }
+  if (Object.keys(contactFields).length) {
+    batch.set(empContactRef(targetId), { ...contactFields, updatedAt: now }, { merge: true });
   }
   await batch.commit();
   return targetId;
 }
 
 export async function createEmployee(data) {
-  const { publicFields, privateFields } = splitEmployeeFields(data);
+  const { publicFields, privateFields, contactFields } = splitEmployeeFields(data);
   const now = new Date().toISOString();
-  // Pre-allocate the ID so the public + private writes can ride a single
-  // batch. addDoc → setDoc sequentially could leave the public doc
-  // committed without its private/comp child if the second write fails.
+  // Pre-allocate the ID so the public + private + contact writes can ride a
+  // single batch. addDoc → setDoc sequentially could leave the public doc
+  // committed without its sub-docs if a later write fails.
   const ref = doc(EMPLOYEES_COL);
   const batch = writeBatch(db);
   batch.set(ref, { ...publicFields, createdAt: now, updatedAt: now });
   if (Object.keys(privateFields).length) {
     batch.set(empPrivateRef(ref.id), { ...privateFields, createdAt: now, updatedAt: now });
+  }
+  if (Object.keys(contactFields).length) {
+    batch.set(empContactRef(ref.id), { ...contactFields, createdAt: now, updatedAt: now });
   }
   await batch.commit();
   return ref.id;
@@ -1166,6 +1206,80 @@ export async function purgeMembership(id) {
   await deleteDoc(doc(MEMBERSHIPS_COL, id));
 }
 
+// ── Store: trainer product marketplace ─────────────────
+// storeProducts is the admin-managed catalog (soft-deleted). storeOrders is
+// server-written money/audit data (NOT soft-deleted; rules forbid client
+// writes) — read-only from the app via subscribeStoreOrders.
+const STORE_PRODUCTS_COL = tenantCol('storeProducts');
+const STORE_ORDERS_COL   = tenantCol('storeOrders');
+
+export function subscribeStoreProducts(cb) {
+  return onSnapshot(STORE_PRODUCTS_COL, snap => {
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(notTombstoned)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    cb(list);
+  });
+}
+export async function fetchStoreProducts() {
+  const snap = await getDocs(STORE_PRODUCTS_COL);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(notTombstoned)
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+export async function createStoreProduct(data) {
+  const ref = await addDoc(STORE_PRODUCTS_COL, {
+    ...data,
+    active: data.active !== false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  return ref.id;
+}
+// Stripe Prices are immutable. If the price/billing shape changes, drop the
+// cached stripePriceId so the Cloud Function mints a fresh Price on the next
+// checkout (read-before-write so a no-op edit doesn't churn Stripe objects).
+export async function saveStoreProduct(id, data) {
+  const ref = doc(STORE_PRODUCTS_COL, id);
+  let clearPrice = {};
+  try {
+    const cur = await getDoc(ref);
+    if (cur.exists()) {
+      const c = cur.data();
+      const changed = Number(c.price) !== Number(data.price)
+        || (c.billingType || 'one_time') !== (data.billingType || 'one_time')
+        || (c.interval || null) !== (data.interval || null)
+        || (c.currency || 'usd') !== (data.currency || 'usd');
+      if (changed && c.stripePriceId) clearPrice = { stripePriceId: null };
+    }
+  } catch { /* best-effort: a failed read just means we don't clear */ }
+  await setDoc(ref, { ...data, ...clearPrice, updatedAt: new Date().toISOString() }, { merge: true });
+}
+export async function deleteStoreProduct(id, deletedBy) {
+  await softDelete(doc(STORE_PRODUCTS_COL, id), deletedBy);
+}
+export async function purgeStoreProduct(id) {
+  await deleteDoc(doc(STORE_PRODUCTS_COL, id));
+}
+
+// Orders are read-only in the app (the webhook writes them via Admin SDK).
+export function subscribeStoreOrders(cb) {
+  return onSnapshot(STORE_ORDERS_COL, snap => {
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    cb(list);
+  });
+}
+// Portal read-back: a signed-in client's own purchases (rules enforce the
+// clientEmail == token.email match). Sorted newest-first client-side.
+export async function fetchClientStoreOrders(email) {
+  const e = String(email || '').toLowerCase();
+  if (!e) return [];
+  const snap = await getDocs(query(STORE_ORDERS_COL, where('clientEmail', '==', e)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+
 // ── Personal-training vertical collections ─────────────
 // Defined together so the SOFT_DELETED_COLLECTIONS arrows above resolve even
 // before each wave's CRUD is wired. Programs CRUD = Wave 2, session packs =
@@ -1287,6 +1401,10 @@ export async function deleteProgressEntry(clientId, entryId) {
 }
 
 // ── Session-credit packs ───────────────────────────────
+export async function fetchSessionPacks() {
+  const snap = await getDocs(SESSION_PACKS_COL);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
+}
 export function subscribeSessionPacks(cb) {
   return onSnapshot(SESSION_PACKS_COL, snap => {
     cb(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned)
@@ -2721,6 +2839,24 @@ export async function saveBookingConfig(data) {
   await setDoc(BOOKING_CONFIG_REF, { ...data, updatedAt: new Date().toISOString() });
 }
 
+// Merge-safe partial update of the booking config — only touches the given
+// fields (e.g. { categoryDisplay }) so a targeted write from ServicesAdmin
+// can't clobber the rest of the config (enabled / flow / removalPrice / …).
+export async function updateBookingConfig(patch) {
+  await setDoc(BOOKING_CONFIG_REF, { ...patch, updatedAt: new Date().toISOString() }, { merge: true });
+}
+
+// Replace the whole categoryDisplay map (not deep-merge) so REMOVING a category
+// key actually drops it — merge would retain the old key. updateDoc replaces the
+// field; falls back to a create if the config doc doesn't exist yet.
+export async function replaceCategoryDisplay(map) {
+  try {
+    await updateDoc(BOOKING_CONFIG_REF, { categoryDisplay: map, updatedAt: new Date().toISOString() });
+  } catch {
+    await setDoc(BOOKING_CONFIG_REF, { categoryDisplay: map, updatedAt: new Date().toISOString() }, { merge: true });
+  }
+}
+
 // ── Client chat ────────────────────────────────────────
 // One document per client (keyed by clientId). Messages stored as an array.
 const CHATS_COL = tenantCol('chats');
@@ -3244,7 +3380,13 @@ export async function fetchTenantTimezone() {
 }
 
 export async function addToWaitlist(data) {
-  return addDoc(WAITLIST_COL, { ...data, date: todayDateStr(), addedAt: new Date().toISOString(), status: 'waiting' });
+  // The waitlist doc is world-readable (public /?queue lobby reads it
+  // unauthenticated), so it must NEVER hold contact PII. Strip phone/email and
+  // keep a first-name-only display label + clientId; staff resolve full contact
+  // via clientId -> client doc. Single choke point so no caller can leak.
+  const { clientPhone: _p, clientEmail: _e, clientName, ...rest } = data || {};
+  const displayName = (clientName || '').trim().split(/\s+/)[0] || '';
+  return addDoc(WAITLIST_COL, { ...rest, clientName: displayName, date: todayDateStr(), addedAt: new Date().toISOString(), status: 'waiting' });
 }
 
 // Public lobby kiosk: phone-first client lookup + create, via a guarded Cloud

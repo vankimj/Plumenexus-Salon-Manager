@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, memo } from 'react';
 import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { fetchReceiptsByRange, fetchReceiptsByClientName, fetchAppointmentsByIds, fetchClient, fetchSettings } from '../../lib/firestore';
 import ResendReceiptRow from '../../components/ResendReceiptRow';
@@ -90,87 +90,19 @@ export default function ReceiptsScreen() {
       String(r.clientEmail || '').toLowerCase().includes(term));
   }, [allTime, q, list]);
 
-  function renderItem({ item }) {
-    const open = openId === item.id;
-    const contact = item.clientPhone || item.clientEmail || '';
-    const pay     = item.payment || {};
-    const method  = pay.method || '';
-    const refunded = Number(item.refundedAmount) || 0;
-    const remaining = Math.max(0, (Number(pay.total) || 0) - refunded);
-    const redos = Array.isArray(item.redos) ? item.redos : [];
-    const hasRedo = redos.length > 0;
-    return (
-      <View style={styles.card}>
-        <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => setOpenId(open ? null : item.id)}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.name} numberOfLines={1}>{item.clientName || 'Walk-in'}</Text>
-            <Text style={styles.meta} numberOfLines={1}>{fmtDate(item.date)}{item.techName ? ` · ${item.techName}` : ''}{method ? ` · ${method}` : ''}</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.total, refunded > 0 && { textDecorationLine: 'line-through', color: theme.textMuted }]}>{money(pay.total)}</Text>
-            {refunded > 0 && <Text style={styles.refundedTag}>−{money(refunded)} refunded</Text>}
-            {hasRedo && <Text style={styles.redoneTag}>↻ Redone</Text>}
-          </View>
-          <Text style={styles.chev}>{open ? '▾' : '▸'}</Text>
-        </TouchableOpacity>
-        {open && (
-          <View style={styles.expand}>
-            {(item.services || []).map((s, i) => (
-              <View key={`s${i}`} style={styles.liRow}>
-                <Text style={styles.liName} numberOfLines={1}>{s.name || '—'}{s.techName ? ` · ${s.techName}` : ''}</Text>
-                <Text style={styles.liVal}>{money(s.price)}</Text>
-              </View>
-            ))}
-            {(item.retailProducts || []).map((p, i) => (
-              <View key={`p${i}`} style={styles.liRow}>
-                <Text style={styles.liName} numberOfLines={1}>{p.name}{p.qty > 1 ? ` ×${p.qty}` : ''}</Text>
-                <Text style={styles.liVal}>{money((Number(p.price) || 0) * (p.qty || 1))}</Text>
-              </View>
-            ))}
-            {pay.discountAmount > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Discount</Text><Text style={styles.liMuted}>−{money(pay.discountAmount)}</Text></View>}
-            {pay.promoAmount > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Promo</Text><Text style={styles.liMuted}>−{money(pay.promoAmount)}</Text></View>}
-            {pay.giftCard?.applied > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Gift card used</Text><Text style={styles.liMuted}>−{money(pay.giftCard.applied)}</Text></View>}
-            {pay.creditApplied > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Store credit used</Text><Text style={styles.liMuted}>−{money(pay.creditApplied)}</Text></View>}
-            {pay.tax > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Tax</Text><Text style={styles.liMuted}>{money(pay.tax)}</Text></View>}
-            {pay.tip > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Tip</Text><Text style={styles.liMuted}>{money(pay.tip)}</Text></View>}
-            <View style={[styles.liRow, styles.liTotal]}><Text style={styles.liName}>Total</Text><Text style={styles.liVal}>{money(pay.total)}{paidWith(pay) ? ` · ${paidWith(pay)}` : ''}</Text></View>
+  const toggleOpen = useCallback((id) => setOpenId(cur => (cur === id ? null : id)), []);
 
-            {(item.refunds || (item.refund ? [item.refund] : [])).map((r, i) => (
-              <View key={`rf${i}`} style={[styles.liRow, i === 0 && { marginTop: 6 }]}>
-                <Text style={styles.refundLine} numberOfLines={1}>↩ {refundTypeLabel(r)} refund{r.reason ? ` · ${r.reason}` : ''}</Text>
-                <Text style={styles.refundLine}>−{money(r.amount)}</Text>
-              </View>
-            ))}
-
-            {redos.map((r, i) => (
-              <View key={`rd${i}`} style={[styles.liRow, i === 0 && { marginTop: 6 }]}>
-                <Text style={styles.redoLine} numberOfLines={1}>↻ Redone by {r.toTech || '—'}{r.reason ? ` · ${r.reason}` : ''}</Text>
-                <Text style={styles.redoLine}>{money(r.amount)}</Text>
-              </View>
-            ))}
-
-            <Text style={styles.expandLabel}>Resend receipt</Text>
-            {(item.apptIds || []).length > 1
-              ? <ReceiptRecipients receipt={item} theme={theme} styles={styles} />
-              : <ResendReceiptRow receiptId={item.id} viewToken={item.viewToken || null} defaultContact={contact} compact />}
-
-            <View style={styles.actionRow}>
-              {remaining > 0 ? (
-                <TouchableOpacity style={[styles.refundBtn, { flex: 1 }]} onPress={() => setRefundReceipt(item)} activeOpacity={0.85}>
-                  <Text style={styles.refundBtnText}>↩ Refund{refunded > 0 ? ` (${money(remaining)} left)` : ''}</Text>
-                </TouchableOpacity>
-              ) : (
-                <Text style={[styles.fullyRefunded, { flex: 1 }]}>Fully refunded</Text>
-              )}
-              <TouchableOpacity style={[styles.redoBtn, { flex: 1 }]} onPress={() => setRedoReceipt(item)} activeOpacity={0.85}>
-                <Text style={styles.redoBtnText}>↻ Redo service</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </View>
-    );
-  }
+  const renderItem = useCallback(({ item }) => (
+    <ReceiptCard
+      item={item}
+      open={openId === item.id}
+      onToggle={toggleOpen}
+      styles={styles}
+      theme={theme}
+      onRefund={setRefundReceipt}
+      onRedo={setRedoReceipt}
+    />
+  ), [openId, toggleOpen, styles, theme]);
 
   function afterRefund(info) {
     setRefundReceipt(null);
@@ -232,6 +164,7 @@ export default function ReceiptsScreen() {
       <FlatList
         style={styles.wrap}
         data={filtered}
+        extraData={openId}
         keyExtractor={(r) => r.id}
         contentContainerStyle={{ padding: 14, paddingBottom: 40 }}
         keyboardShouldPersistTaps="handled"
@@ -245,6 +178,89 @@ export default function ReceiptsScreen() {
     </>
   );
 }
+
+// One receipt row, memoized so the FlatList only re-renders the row whose
+// `item` or `open` state actually changed (openId is threaded in via extraData).
+const ReceiptCard = memo(function ReceiptCard({ item, open, onToggle, styles, theme, onRefund, onRedo }) {
+  const contact = item.clientPhone || item.clientEmail || '';
+  const pay     = item.payment || {};
+  const method  = pay.method || '';
+  const refunded = Number(item.refundedAmount) || 0;
+  const remaining = Math.max(0, (Number(pay.total) || 0) - refunded);
+  const redos = Array.isArray(item.redos) ? item.redos : [];
+  const hasRedo = redos.length > 0;
+  return (
+    <View style={styles.card}>
+      <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={() => onToggle(item.id)}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name} numberOfLines={1}>{item.clientName || 'Walk-in'}</Text>
+          <Text style={styles.meta} numberOfLines={1}>{fmtDate(item.date)}{item.techName ? ` · ${item.techName}` : ''}{method ? ` · ${method}` : ''}</Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={[styles.total, refunded > 0 && { textDecorationLine: 'line-through', color: theme.textMuted }]}>{money(pay.total)}</Text>
+          {refunded > 0 && <Text style={styles.refundedTag}>−{money(refunded)} refunded</Text>}
+          {hasRedo && <Text style={styles.redoneTag}>↻ Redone</Text>}
+        </View>
+        <Text style={styles.chev}>{open ? '▾' : '▸'}</Text>
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.expand}>
+          {(item.services || []).map((s, i) => (
+            <View key={`s${i}`} style={styles.liRow}>
+              <Text style={styles.liName} numberOfLines={1}>{s.name || '—'}{s.techName ? ` · ${s.techName}` : ''}</Text>
+              <Text style={styles.liVal}>{money(s.price)}</Text>
+            </View>
+          ))}
+          {(item.retailProducts || []).map((p, i) => (
+            <View key={`p${i}`} style={styles.liRow}>
+              <Text style={styles.liName} numberOfLines={1}>{p.name}{p.qty > 1 ? ` ×${p.qty}` : ''}</Text>
+              <Text style={styles.liVal}>{money((Number(p.price) || 0) * (p.qty || 1))}</Text>
+            </View>
+          ))}
+          {pay.discountAmount > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Discount</Text><Text style={styles.liMuted}>−{money(pay.discountAmount)}</Text></View>}
+          {pay.promoAmount > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Promo</Text><Text style={styles.liMuted}>−{money(pay.promoAmount)}</Text></View>}
+          {pay.giftCard?.applied > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Gift card used</Text><Text style={styles.liMuted}>−{money(pay.giftCard.applied)}</Text></View>}
+          {pay.creditApplied > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Store credit used</Text><Text style={styles.liMuted}>−{money(pay.creditApplied)}</Text></View>}
+          {pay.tax > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Tax</Text><Text style={styles.liMuted}>{money(pay.tax)}</Text></View>}
+          {pay.tip > 0 && <View style={styles.liRow}><Text style={styles.liMuted}>Tip</Text><Text style={styles.liMuted}>{money(pay.tip)}</Text></View>}
+          <View style={[styles.liRow, styles.liTotal]}><Text style={styles.liName}>Total</Text><Text style={styles.liVal}>{money(pay.total)}{paidWith(pay) ? ` · ${paidWith(pay)}` : ''}</Text></View>
+
+          {(item.refunds || (item.refund ? [item.refund] : [])).map((r, i) => (
+            <View key={`rf${i}`} style={[styles.liRow, i === 0 && { marginTop: 6 }]}>
+              <Text style={styles.refundLine} numberOfLines={1}>↩ {refundTypeLabel(r)} refund{r.reason ? ` · ${r.reason}` : ''}</Text>
+              <Text style={styles.refundLine}>−{money(r.amount)}</Text>
+            </View>
+          ))}
+
+          {redos.map((r, i) => (
+            <View key={`rd${i}`} style={[styles.liRow, i === 0 && { marginTop: 6 }]}>
+              <Text style={styles.redoLine} numberOfLines={1}>↻ Redone by {r.toTech || '—'}{r.reason ? ` · ${r.reason}` : ''}</Text>
+              <Text style={styles.redoLine}>{money(r.amount)}</Text>
+            </View>
+          ))}
+
+          <Text style={styles.expandLabel}>Resend receipt</Text>
+          {(item.apptIds || []).length > 1
+            ? <ReceiptRecipients receipt={item} theme={theme} styles={styles} />
+            : <ResendReceiptRow receiptId={item.id} viewToken={item.viewToken || null} defaultContact={contact} compact />}
+
+          <View style={styles.actionRow}>
+            {remaining > 0 ? (
+              <TouchableOpacity style={[styles.refundBtn, { flex: 1 }]} onPress={() => onRefund(item)} activeOpacity={0.85}>
+                <Text style={styles.refundBtnText}>↩ Refund{refunded > 0 ? ` (${money(remaining)} left)` : ''}</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={[styles.fullyRefunded, { flex: 1 }]}>Fully refunded</Text>
+            )}
+            <TouchableOpacity style={[styles.redoBtn, { flex: 1 }]} onPress={() => onRedo(item)} activeOpacity={0.85}>
+              <Text style={styles.redoBtnText}>↻ Redo service</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+});
 
 // A combined checkout writes one receipt covering everyone but stores only the
 // primary contact. Resolve each participant from the receipt's apptIds → clients

@@ -59,3 +59,11 @@ export function buildCapEmails(users, overlay) {
 export function buildScheduleViewOnlyEmails(users) {
   return emailsByRole(users, u => u.role === 'tech' && u.scheduleAccess === 'view');
 }
+
+// Users on the built-in `readonly` role. The rules' isTenantReadonly() reads
+// this to DENY writes — readonly means "view but never change anything". Kept
+// SEPARATE from staffEmails so readonly keeps all its READS; only writes are
+// withheld. Fail-safe: an empty/absent list => today's behavior.
+export function buildReadonlyEmails(users) {
+  return emailsByRole(users, u => normalizeRole(u.role) === 'readonly');
+}

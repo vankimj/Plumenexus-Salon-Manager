@@ -13,6 +13,7 @@ import { isSalonOpenNow, offClockTechNames, attendanceKey } from '../../lib/shif
 import { computeTotals, buildTechSplit, normalizePromo, genReceiptToken, parseReceiptContact } from '../../lib/checkout';
 import { resolveLoyaltyConfig } from '../../lib/loyalty';
 import { completeSale } from '../../lib/completeSale';
+import { recordCheckoutAndMaybeAsk } from '../../lib/reviewPrompt';
 import { defaultWalkIn } from '../../lib/metrics';
 import { recordSale, syncOfflineSales } from '../../lib/resilientSale';
 import { isTerminalAvailable } from '../../lib/terminal';
@@ -102,6 +103,9 @@ export default function CheckoutScreen({ navigation }) {
   const [done, setDone]           = useState(null);   // {total,method,queued,note} once the receipt is written
   const [recordErr, setRecordErr] = useState('');
   const [saleId]                  = useState(() => genReceiptToken(24)); // idempotency key + receipt id
+  // A completed (non-queued) sale is a genuine "good moment" — offer an App
+  // Store rating. Self-gated + iOS-throttled; never blocks or affects checkout.
+  useEffect(() => { if (done && !done.queued) recordCheckoutAndMaybeAsk(); }, [done]); // eslint-disable-line react-hooks/exhaustive-deps
   const [receiptPhone, setReceiptPhone] = useState(''); // walk-ins: capture a number for the texted receipt
   const hasPhoneOnFile = (tab.appts || []).some(a => a.clientPhone);
   // Walk-in vs scheduled — same-day-booked defaults to walk-in; staff can flip.

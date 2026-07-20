@@ -37,6 +37,8 @@ export const SAMPLE_VARS = {
   techSuffix: ' with Sammy', manageSuffix: ' Manage: https://mrk.co/abc',
   confirmSuffix: ' Confirm/reschedule: https://mrk.co/abc',
   rebookSuffix: ' Rebook anytime: https://merakinailstudio.plumenexus.com/book',
+  bookLink: 'https://merakinailstudio.plumenexus.com/book',
+  lastServiceSuffix: ' since your Gel Manicure',
 };
 
 // Trusted HTML blocks used in previews so structured emails (receipt, booking)

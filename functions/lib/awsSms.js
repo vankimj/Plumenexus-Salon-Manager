@@ -33,11 +33,15 @@ function getAwsSmsClient({ region, accessKeyId, secretAccessKey } = {}) {
 //                      string (E.164), a phoneNumberId, or a pool ARN. AWS
 //                      accepts any of these as OriginationIdentity.
 //   messageType:       'TRANSACTIONAL' (default) | 'PROMOTIONAL'
+//   configurationSet:  optional AWS End User Messaging config-set name. When
+//                      set, AWS emits delivery events (SENT/DELIVERED/BLOCKED/…)
+//                      to that set's SNS destination → our smsDeliveryStatus CF.
+//                      Omitted = fire-and-forget (no delivery tracking).
 //   config:            { region, accessKeyId, secretAccessKey } — reuses the
 //                      SES IAM creds.
 //   client:            optional injected client (unit tests).
 // Returns { ok:true, messageId } | { ok:false, error }.
-async function sendViaAwsSms({ to, body, originationNumber, messageType = 'TRANSACTIONAL', config, client }) {
+async function sendViaAwsSms({ to, body, originationNumber, messageType = 'TRANSACTIONAL', configurationSet, config, client }) {
   if (!to || !body)         return { ok: false, error: 'missing_to_or_body' };
   if (!originationNumber)   return { ok: false, error: 'aws_sms_no_origination' };
   const cfg = config || {};
@@ -52,6 +56,7 @@ async function sendViaAwsSms({ to, body, originationNumber, messageType = 'TRANS
       OriginationIdentity:    originationNumber,
       MessageBody:            body,
       MessageType:            messageType === 'PROMOTIONAL' ? 'PROMOTIONAL' : 'TRANSACTIONAL',
+      ...(configurationSet ? { ConfigurationSetName: configurationSet } : {}),
     }));
     return { ok: true, messageId: res && res.MessageId ? res.MessageId : null };
   } catch (e) {

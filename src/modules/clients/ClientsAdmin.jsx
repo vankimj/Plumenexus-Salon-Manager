@@ -3,7 +3,7 @@ import Button from '../../components/Button';
 import { fetchClients, createClient, saveClient, deleteClient, fetchServices, fetchClientAppointments, createReviewRequest, saveReviewReceived, fetchClientInsurance, saveClientInsurance } from '../../lib/firestore';
 import RestoreFromBQModal from '../../components/RestoreFromBQModal';
 import TrashButton from '../../components/TrashButton';
-import { resizeImg, formatTime } from '../../utils/helpers';
+import { resizeImg, formatTime, normURL } from '../../utils/helpers';
 import { logActivity, logError } from '../../lib/logger';
 import { callFn } from '../../lib/firebase';
 import { TENANT_ID } from '../../lib/tenant';
@@ -951,7 +951,7 @@ function ClientModal({ client, allClients = [], initialMode = 'edit', onChange, 
                   {isView ? (
                     <>
                       {tag.url
-                        ? <a href={tag.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#3D95CE', wordBreak: 'break-all', display: 'block', marginBottom: tag.note ? 4 : 0 }}>{tag.url}</a>
+                        ? <a href={normURL(tag.url)} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#3D95CE', wordBreak: 'break-all', display: 'block', marginBottom: tag.note ? 4 : 0 }}>{tag.url}</a>
                         : <div style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>No URL</div>
                       }
                       {tag.note && <div style={{ fontSize: 11, color: 'var(--pn-text-muted)' }}>{tag.note}</div>}
@@ -996,7 +996,7 @@ function ClientModal({ client, allClients = [], initialMode = 'edit', onChange, 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: rev.text ? 6 : 0 }}>
                         <span style={{ fontSize: 13, color: '#f59e0b' }}>{'★'.repeat(rev.rating)}</span>
                         <span style={{ fontSize: 11, color: 'var(--pn-text-muted)' }}>{formatDate(rev.date)}</span>
-                        {rev.url && <a href={rev.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3D95CE', marginLeft: 'auto' }}>link</a>}
+                        {rev.url && <a href={normURL(rev.url)} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3D95CE', marginLeft: 'auto' }}>link</a>}
                       </div>
                       {rev.text && <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5 }}>{rev.text}</div>}
                     </>

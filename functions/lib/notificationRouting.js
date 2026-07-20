@@ -14,7 +14,7 @@ const INTERNAL_EVENTS = [
 ];
 
 const CUSTOMER_EVENTS = [
-  'booking_confirmation', 'appointment_reminder', 'cancellation_notice', 'receipt', 'review_request',
+  'booking_confirmation', 'appointment_reminder', 'cancellation_notice', 'receipt', 'review_request', 'rebook_nudge',
 ];
 
 const emptyRoleChannels = () => ({ push: false, email: false, sms: false });

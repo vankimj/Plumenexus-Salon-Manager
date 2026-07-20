@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react';
-import { saveAppointment, fetchClient, saveClient, redeemLoyaltyPoints,
+import { saveAppointment, fetchClient, saveClient,
          fetchGiftCardByCode, fetchGiftCardsByContact, updateGiftCard, createGiftCard,
          fetchPromoByCode, savePromoCode, createReceipt,
          fetchProducts, saveProduct, createReviewRequest,
@@ -666,19 +666,24 @@ function CheckoutInner({ appts: apptsProp, appt, walkInClient = null, initialPro
       logActivity('checkout_complete',
         `${combinedClientLabel}${appts.length > 1 ? ` (${appts.length} appts)` : ''}${retailProducts ? ` · ${retailProducts.length} product${retailProducts.length > 1 ? 's' : ''}` : ''} · ${techLabel} · $${total.toFixed(2)} via ${method}${discountAmount > 0 ? ` · discount -$${discountAmount.toFixed(2)}` : ''}${promoAmount > 0 ? ` · promo ${promo?.code}` : ''}${gcApply > 0 ? ` · GC -$${gcApply.toFixed(2)}` : ''}${tipAmt > 0 ? ` · tip $${tipAmt.toFixed(2)}` : ''}`);
 
-      // Side effects (single application across the whole bill)
-      if (giftCard && applyGC && gcApply > 0) {
-        await updateGiftCard(giftCard.id, { balance: Math.max(giftCard.balance - gcApply, 0) });
-      }
-      if (promo) {
-        const newCount = (promo.usedCount || 0) + 1;
-        const maxHit   = promo.maxUses && newCount >= promo.maxUses;
-        await savePromoCode(promo.id, {
-          ...promo,
-          usedCount: newCount,
-          ...(promo.singleUse || maxHit ? { active: false } : {}),
-          ...(promo.singleUse ? { usedAt: new Date().toISOString() } : {}),
-        });
+      // Server-authoritative redemptions — store-credit + gift-card decrement
+      // (each capped to the real balance) + promo usage, applied atomically and
+      // idempotently by saleId. Clients can no longer write clients.credit /
+      // giftCards / promoCodes directly (rules), so this is the ONLY path that
+      // moves that money. Best-effort like the other post-capture side effects.
+      if (creditApply > 0 || (giftCard && applyGC && gcApply > 0) || promo || loyaltyPts > 0) {
+        try {
+          await callFn('redeemAtCheckout')({
+            tenantId: TENANT_ID,
+            saleId,
+            clientId: primaryClient?.id || null,
+            creditToApply: creditApply,
+            giftCardId: (giftCard && applyGC && gcApply > 0) ? giftCard.id : null,
+            giftCardAmount: (giftCard && applyGC && gcApply > 0) ? gcApply : 0,
+            promoId: promo ? promo.id : null,
+            loyaltyPointsToRedeem: loyaltyPts > 0 ? loyaltyPts : 0,
+          });
+        } catch (e) { console.warn('[checkout] redeemAtCheckout failed:', e?.message); }
       }
       if (cartItems.length > 0) {
         await Promise.all(cartItems.map(async item => {
@@ -695,16 +700,9 @@ function CheckoutInner({ appts: apptsProp, appt, walkInClient = null, initialPro
         if (c) {
           clientEmail = c.email?.trim() || clientEmail;
           clientPhoneOnFile = (c.phone || '').trim();
-          if (creditApply > 0) {
-            const newCredit = Math.max((c.credit || 0) - creditApply, 0);
-            const { id: cid, createdAt: cc, ...cd } = c;
-            await saveClient(cid, { ...cd, credit: newCredit });
-          }
-          // Loyalty redemption — atomic decrement (own helper), separate from the
-          // credit read-modify-write so it can't be clobbered by the earn trigger.
-          if (loyaltyPts > 0) {
-            await redeemLoyaltyPoints(primaryClient.id, loyaltyPts, saleId).catch(() => {});
-          }
+          // (store-credit decrement now happens server-side in redeemAtCheckout)
+          // (loyalty-point decrement now happens server-side in redeemAtCheckout too —
+          //  clients can no longer write clients.loyaltyPoints directly per rules)
         }
       }
       // clientPhone: walk-in tmpPhone OR primary appt's stored phone OR the
