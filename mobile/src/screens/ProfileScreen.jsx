@@ -14,6 +14,7 @@ import { clearPushTokenForUser } from '../hooks/usePushRegistration';
 import { clearCurrentTenant } from '../lib/currentTenant';
 import { getPrefs, setTheme, setAutoLogoutMin, subscribePrefs } from '../lib/userPrefs';
 import { BUILD_LABEL } from '../lib/version';
+import PhoneSigninSetting from '../components/PhoneSigninSetting';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
 import useMyTenants from '../hooks/useMyTenants';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
@@ -642,6 +643,8 @@ export default function ProfileScreen({ navigation }) {
             onPress={pickAutoLogout}
           />
         </View>
+
+        <PhoneSigninSetting />
 
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sign out</Text>

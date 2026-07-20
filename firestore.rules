@@ -182,6 +182,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── Staff phone sign-in (SMS OTP → custom token) ─────
+    //   Server-only. Exposing any of these would defeat the auth boundary:
+    //   phoneAuthOtp holds hashed one-time codes + attempt/send accounting;
+    //   phoneAuthIndex maps phone→uid (a leak enables account enumeration /
+    //   impersonation); phoneAuthByUid is the uid→phone reverse index for
+    //   unlink; serverConfig holds the OTP hashing pepper. All writes/reads go
+    //   through requestPhoneOtp / verifyPhoneOtp / unlinkPhoneSignin (admin SDK).
+    match /phoneAuthOtp/{phoneKey}    { allow read, write: if false; }
+    match /phoneAuthIndex/{phoneKey}  { allow read, write: if false; }
+    match /phoneAuthByUid/{uid}       { allow read, write: if false; }
+    match /phoneAuthSendQuota/{uid}   { allow read, write: if false; }
+    match /serverConfig/{doc}         { allow read, write: if false; }
+
     // ── Platform-admin audit log ─────────────────────────
     //   Append-only forensic trail of all platform-admin actions.
     //   Body shape: { action, actor, actorUid, ip, userAgent, payload,

@@ -3,10 +3,11 @@ import { View, Text, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator,
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
+import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInWithEmailAndPassword, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
 import Constants from 'expo-constants';
 import Svg, { Path } from 'react-native-svg';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
+import { requestPhoneOtp, verifyPhoneOtp } from '../lib/firestore';
 import { useThemedStyles } from '../theme/ThemeContext';
 
 // Official Google "G" mark (4-color) for the Sign in with Google button.
@@ -67,6 +68,12 @@ export default function AuthScreen() {
   const [showEmail, setShowEmail] = useState(false);
   const [email,     setEmail]     = useState('');
   const [password,  setPassword]  = useState('');
+  // Phone sign-in — staff who linked their number in Profile. Two steps:
+  // enter phone → receive code → enter code → custom-token sign-in.
+  const [showPhone, setShowPhone] = useState(false);
+  const [phone,     setPhone]     = useState('');
+  const [otpCode,   setOtpCode]   = useState('');
+  const [otpSent,   setOtpSent]   = useState(false);
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
@@ -84,6 +91,35 @@ export default function AuthScreen() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSendOtp() {
+    const p = phone.trim();
+    if (p.replace(/\D/g, '').length < 10) { Alert.alert('Phone sign-in', 'Enter your mobile number.'); return; }
+    setLoading(true);
+    try {
+      const r = await requestPhoneOtp(p);
+      if (r?.ok) { setOtpSent(true); }
+      else { Alert.alert('Phone sign-in', "Couldn't send a code. Check the number and try again."); }
+    } catch (err) {
+      // resource-exhausted → throttled; anything else → generic.
+      const msg = /resource-exhausted|too many|wait/i.test(err?.message || '') ? err.message : "Couldn't send a code. Try again in a moment.";
+      Alert.alert('Phone sign-in', msg);
+    } finally { setLoading(false); }
+  }
+
+  async function handleVerifyOtp() {
+    const code = otpCode.replace(/\D/g, '');
+    if (code.length !== 6) { Alert.alert('Phone sign-in', 'Enter the 6-digit code.'); return; }
+    setLoading(true);
+    try {
+      const r = await verifyPhoneOtp(phone.trim(), code);
+      if (r?.ok && r.token) { await signInWithCustomToken(auth, r.token); }
+      else { Alert.alert('Phone sign-in', 'That code didn\'t work. Request a new one.'); }
+    } catch (err) {
+      // permission-denied carries a helpful message (attempts left / expired).
+      Alert.alert('Phone sign-in', err?.message?.replace(/^.*?:\s*/, '') || 'That code didn\'t work.');
+    } finally { setLoading(false); }
   }
 
   async function handleGoogleSignIn() {
@@ -218,6 +254,55 @@ export default function AuthScreen() {
                 ? <ActivityIndicator color="#fff" />
                 : <Text style={styles.emailBtnText}>Sign in</Text>}
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Phone sign-in — staff who linked their number in Profile. */}
+        {!showPhone ? (
+          <TouchableOpacity style={styles.emailLink} onPress={() => setShowPhone(true)} disabled={loading}>
+            <Text style={styles.emailLinkText}>Sign in with phone</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.emailForm}>
+            {!otpSent ? (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Mobile number"
+                  placeholderTextColor={styles._muted.color}
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
+                  autoComplete="tel"
+                  onSubmitEditing={handleSendOtp}
+                />
+                <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleSendOtp} disabled={loading} activeOpacity={0.85}>
+                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Send code</Text>}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="6-digit code"
+                  placeholderTextColor={styles._muted.color}
+                  value={otpCode}
+                  onChangeText={setOtpCode}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="sms-otp"
+                  maxLength={6}
+                  onSubmitEditing={handleVerifyOtp}
+                />
+                <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleVerifyOtp} disabled={loading} activeOpacity={0.85}>
+                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Verify & sign in</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={{ paddingVertical: 10, alignItems: 'center' }} onPress={() => { setOtpSent(false); setOtpCode(''); }} disabled={loading}>
+                  <Text style={styles._muted}>Use a different number</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         )}
 
