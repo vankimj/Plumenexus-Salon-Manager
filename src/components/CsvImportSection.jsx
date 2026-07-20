@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey } from '../lib/firestore';
+import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey, fetchEmployees, createEmployee } from '../lib/firestore';
 import { logActivity } from '../lib/logger';
 import {
   parseCsv, detectType,
   mapClientRow, mapAppointmentRow,
   buildReceiptsFromGg, clientKey,
+  collectTechNames, missingTechNames,
 } from '../lib/csvImport';
 
 const TYPE_LABELS = {
@@ -289,6 +290,30 @@ export default function CsvImportSection({ onBusyChange }) {
         setProgressNum({ current: done, total: finalReceipts.length, label: 'receipts' });
       }
       logActivity('gg_import', `joined sales: ${count} new, ${skippedRows.length} skipped${cancelled ? ' [CANCELLED]' : ''}`);
+
+      // Auto-create techs referenced by these transactions who aren't on staff
+      // yet — they likely left before the migration. Create them DISABLED so
+      // their historical revenue stays attributed without cluttering the active
+      // roster. Best-effort: never let this fail the receipt import.
+      try {
+        const referenced = collectTechNames(finalReceipts);
+        const existingEmps = await fetchEmployees();
+        const missing = missingTechNames(referenced, existingEmps.map(e => e.name));
+        for (let i = 0; i < missing.length; i++) {
+          await createEmployee({
+            name: missing[i],
+            active: false,
+            notes: 'Likely a former staff member — auto-created from an imported transaction so past sales stay attributed.',
+            _autoCreatedFromImport: true,
+            sortOrder: existingEmps.length + i,
+          });
+        }
+        if (missing.length) {
+          logActivity('gg_import_former_staff', `${missing.length} disabled staff auto-created: ${missing.join(', ')}`);
+          showToast(`+ ${missing.length} former staff added (disabled) from transactions`, 4000);
+        }
+      } catch (e) { console.warn('[CSV] auto-create former staff failed:', e?.message); }
+
       setProgress('');
       const linkedCount = finalReceipts.filter(r => r.clientId).length;
       if (cancelled) {
