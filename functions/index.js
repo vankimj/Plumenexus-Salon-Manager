@@ -4636,35 +4636,10 @@ async function _otpPepper(db) {
   catch { return (await ref.get()).data()?.pepper; }
 }
 
-exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
-  const phone = normalizePhone(String(request.data?.phone || ''));
-  if (!phone) throw new HttpsError('invalid-argument', 'Enter a valid US mobile number.');
-  const db = getFirestore();
-  const key = phoneAuth.phoneDocKey(phone);
-  const authed = !!request.auth;
-
-  // Sign-in intent from an unauthenticated caller: only proceed if this phone is
-  // actually linked to an account. Return ok regardless so a caller can't probe
-  // which numbers are staff.
-  if (!authed) {
-    const idx = await db.doc(`phoneAuthIndex/${key}`).get();
-    if (!idx.exists) return { ok: true };
-  } else if (!request.auth.token?.email) {
-    // Link intent requires an email account so phone sign-in inherits authz.
-    throw new HttpsError('failed-precondition', 'Add an email to your account before linking a phone.');
-  }
-
-  const otpRef = db.doc(`phoneAuthOtp/${key}`);
-  const cur = (await otpRef.get()).data() || null;
-  const now = Date.now();
-  const gate = phoneAuth.canSendOtp(cur, now);
-  if (!gate.allowed) {
-    throw new HttpsError('resource-exhausted',
-      gate.reason === 'too_soon' ? 'Please wait a few seconds before requesting another code.'
-                                 : 'Too many code requests. Try again later.',
-      { retryAfterMs: gate.retryAfterMs });
-  }
-
+// Generate, store (hashed), and text a fresh OTP. Returns the sendPlatformSms
+// result; callers decide whether a send failure is surfaced or swallowed (the
+// sign-in path swallows it to avoid an enumeration oracle).
+async function _issueAndSendOtp(db, otpRef, phone, cur, now, purpose) {
   const code = phoneAuth.generateOtpCode();
   const pepper = await _otpPepper(db);
   await otpRef.set({
@@ -4672,16 +4647,53 @@ exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
     expiresAt: new Date(now + phoneAuth.OTP_TTL_MS).toISOString(),
     attempts:  0,
     consumedAt: FieldValue.delete(),
-    purpose:   authed ? 'link' : 'signin',
+    purpose,
     ...phoneAuth.nextSendAccounting(cur, now),
     updatedAt: new Date(now).toISOString(),
   }, { merge: true });
+  return sendPlatformSms({ to: phone, body: `Your Plume Nexus code is ${code}. It expires in 10 minutes. Don't share it with anyone.` });
+}
 
-  const r = await sendPlatformSms({ to: phone, body: `Your Plume Nexus code is ${code}. It expires in 10 minutes. Don't share it with anyone.` });
-  if (!r.ok) {
-    console.error('[requestPhoneOtp] send failed:', r.error);
-    throw new HttpsError('unavailable', "Couldn't send the code. Try again in a moment.");
+exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
+  const phone = normalizePhone(String(request.data?.phone || ''));
+  if (!phone) throw new HttpsError('invalid-argument', 'Enter a valid US mobile number.');
+  const db = getFirestore();
+  const key = phoneAuth.phoneDocKey(phone);
+  const otpRef = db.doc(`phoneAuthOtp/${key}`);
+  const now = Date.now();
+
+  // ── SIGN-IN intent (unauthenticated) ──────────────────────────────────────
+  // Every branch returns {ok:true} — no throw, no early-vs-late divergence — so
+  // linked and unlinked numbers are indistinguishable (no enumeration oracle).
+  if (!request.auth) {
+    const idx = await db.doc(`phoneAuthIndex/${key}`).get();
+    if (!idx.exists) return { ok: true };
+    const cur = (await otpRef.get()).data() || null;
+    if (!phoneAuth.canSendOtp(cur, now).allowed) return { ok: true }; // silently throttle
+    await _issueAndSendOtp(db, otpRef, phone, cur, now, 'signin').catch(e => console.error('[requestPhoneOtp] signin send failed:', e?.message));
+    return { ok: true };
   }
+
+  // ── LINK intent (authenticated) ───────────────────────────────────────────
+  if (!request.auth.token?.email) throw new HttpsError('failed-precondition', 'Add an email to your account before linking a phone.');
+  const uid = request.auth.uid;
+  // Per-CALLER cap (independent of the per-phone cap) so one authenticated
+  // account can't spray OTPs across many numbers (SMS bombing / toll fraud).
+  const quotaRef = db.doc(`phoneAuthSendQuota/${uid}`);
+  const q = (await quotaRef.get()).data() || null;
+  if (!phoneAuth.canSendOtp(q, now, { minIntervalMs: 0, maxPerWindow: 10, windowMs: 60 * 60 * 1000 }).allowed) {
+    throw new HttpsError('resource-exhausted', 'Too many attempts. Try again later.');
+  }
+  const cur = (await otpRef.get()).data() || null;
+  const pGate = phoneAuth.canSendOtp(cur, now);
+  if (!pGate.allowed) {
+    throw new HttpsError('resource-exhausted',
+      pGate.reason === 'too_soon' ? 'Please wait a few seconds before requesting another code.' : 'Too many code requests. Try again later.',
+      { retryAfterMs: pGate.retryAfterMs });
+  }
+  await quotaRef.set(phoneAuth.nextSendAccounting(q, now), { merge: true });
+  const r = await _issueAndSendOtp(db, otpRef, phone, cur, now, 'link');
+  if (!r.ok) { console.error('[requestPhoneOtp] link send failed:', r.error); throw new HttpsError('unavailable', "Couldn't send the code. Try again in a moment."); }
   return { ok: true };
 });
 
@@ -4694,14 +4706,26 @@ exports.verifyPhoneOtp = onCall({ cors: true }, async (request) => {
   const db = getFirestore();
   const key = phoneAuth.phoneDocKey(phone);
   const otpRef = db.doc(`phoneAuthOtp/${key}`);
-  const rec = (await otpRef.get()).data() || null;
   const pepper = await _otpPepper(db);
   const now = Date.now();
 
-  const res = phoneAuth.evaluateOtp(rec, code, phone, pepper, now);
+  // Atomic check-and-consume. Serializing the read, the attempt-increment, and
+  // the single-use consume in one transaction is what makes the 5-attempt
+  // lockout real: concurrent verify requests can't all read attempts=0 and
+  // each guess once (which would defeat the lockout and enable brute force).
+  const res = await db.runTransaction(async (tx) => {
+    const rec = (await tx.get(otpRef)).data() || null;
+    const r = phoneAuth.evaluateOtp(rec, code, phone, pepper, now);
+    if (!r.ok) {
+      if (r.reason === 'bad_code') tx.set(otpRef, { attempts: (Number(rec?.attempts) || 0) + 1 }, { merge: true });
+      return r;
+    }
+    tx.set(otpRef, { consumedAt: new Date(now).toISOString() }, { merge: true });
+    return r;
+  });
+
   if (!res.ok) {
     if (res.reason === 'bad_code') {
-      await otpRef.set({ attempts: (Number(rec?.attempts) || 0) + 1 }, { merge: true });
       throw new HttpsError('permission-denied',
         res.attemptsLeft > 0 ? `Incorrect code. ${res.attemptsLeft} attempt${res.attemptsLeft === 1 ? '' : 's'} left.` : 'Too many incorrect attempts. Request a new code.',
         { attemptsLeft: res.attemptsLeft });
@@ -4711,9 +4735,6 @@ exports.verifyPhoneOtp = onCall({ cors: true }, async (request) => {
       : 'Request a code first.';
     throw new HttpsError('permission-denied', msg);
   }
-
-  // Consume the code (single-use) before doing anything else.
-  await otpRef.set({ consumedAt: new Date(now).toISOString() }, { merge: true });
 
   // LINK: an authenticated caller is binding this phone to their own account.
   if (request.auth) {
