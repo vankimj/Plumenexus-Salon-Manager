@@ -4763,6 +4763,15 @@ exports.unlinkPhoneSignin = onCall({ cors: true }, async (request) => {
   return { ok: true, unlinked: true };
 });
 
+// Whether the caller has a phone linked (drives the Profile toggle). Returns the
+// number masked to the last 4 — never the full number back to the client.
+exports.getPhoneSigninStatus = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const byUid = (await getFirestore().doc(`phoneAuthByUid/${request.auth.uid}`).get()).data();
+  if (!byUid?.phoneE164) return { ok: true, linked: false };
+  return { ok: true, linked: true, last4: String(byUid.phoneE164).slice(-4) };
+});
+
 // RBAC #8 — the server-funnel for kiosk sales. A dedicated kiosk identity has NO
 // direct write access to receipts/clients/products; instead it calls this. The
 // server RECOMPUTES the bill from the tech-authored checkoutSession (never trusts

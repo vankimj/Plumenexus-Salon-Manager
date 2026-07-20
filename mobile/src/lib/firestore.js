@@ -759,6 +759,26 @@ export async function fetchGiftCardsByContact(qRaw) {
   });
   return out.slice(0, 25);
 }
+// Staff phone sign-in (SMS OTP → custom token). requestPhoneOtp is callable
+// unauthenticated (sign-in) or authenticated (link). verifyPhoneOtp returns a
+// custom token when signing in, or { linked:true } when linking.
+export async function requestPhoneOtp(phone) {
+  const res = await callFn('requestPhoneOtp')({ phone });
+  return res?.data || { ok: false };
+}
+export async function verifyPhoneOtp(phone, code) {
+  const res = await callFn('verifyPhoneOtp')({ phone, code });
+  return res?.data || { ok: false };
+}
+export async function unlinkPhoneSignin() {
+  const res = await callFn('unlinkPhoneSignin')({});
+  return res?.data || { ok: false };
+}
+export async function getPhoneSigninStatus() {
+  const res = await callFn('getPhoneSigninStatus')({});
+  return res?.data || { ok: false, linked: false };
+}
+
 // Stripe Terminal (Slice 2) — backend callables. The reader/Tap-to-Pay flow
 // that consumes these lives in lib/terminal.js (needs the native SDK + a
 // rebuild + a reader to run).
