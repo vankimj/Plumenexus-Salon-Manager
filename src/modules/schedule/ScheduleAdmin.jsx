@@ -247,6 +247,10 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   const scheduleReadOnly = isTech && !canEditOwnSchedule;
 
   const [date,         setDate]        = useState(todayStr());
+  // Active employee records (for per-tech appt windows). MUST be declared before
+  // the derived per-tech hours block below (buildTechApptHours reads it) — a
+  // later declaration puts it in the temporal dead zone and crashes render.
+  const [empRecords,       setEmpRecords]       = useState([]);
 
   // Derive walk-in hours from per-day store hours (fall back to global walkIn setting)
   const dow_ = dayOfWeek(date);
@@ -287,7 +291,6 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   const [services,     setServices]    = useState([]);
   const [techs,        setTechs]       = useState(FALLBACK_TECHS);
   const [techExtended,     setTechExtended]     = useState({});
-  const [empRecords,       setEmpRecords]       = useState([]); // active employee records (for per-tech appt windows)
   const [showAll,          setShowAll]          = useState(false);
   const [showHours,        setShowHours]        = useState(false);
   const [showTimeOff,      setShowTimeOff]      = useState(false);
