@@ -170,97 +170,6 @@ function Link({ href, children }) {
   return <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#6a4fa0', fontWeight: 600, textDecoration: 'underline' }}>{children}</a>;
 }
 
-// Side-by-side trade-off table. Renders ABOVE the two picker cards so
-// the salon owner sees the substantive differences at decision time
-// (cost, ownership, login surface, dispute handling, portability).
-// Rates + Connect fees verified against stripe.com/pricing and
-// stripe.com/connect/pricing via WebFetch on 2026-06-03.
-function ConnectComparisonTable() {
-  const ROWS = [
-    {
-      label: 'Setup time',
-      std:   '~5 min on stripe.com',
-      exp:   '~5 min embedded in Plume',
-    },
-    {
-      label: 'Where you log in',
-      std:   'stripe.com (separate account)',
-      exp:   'Plume only — no stripe.com login',
-    },
-    {
-      label: 'Processing rate',
-      std:   '2.9% + $0.30 online · 2.7% + $0.05 Terminal',
-      exp:   'Same',
-    },
-    {
-      label: 'Per-payout fee',
-      std:   <span style={{ color: '#065f46', fontWeight: 600 }}>None</span>,
-      exp:   <>~0.25% + $0.25 <em style={{ opacity: 0.7 }}>per payout</em></>,
-    },
-    {
-      label: 'Monthly account fee',
-      std:   <span style={{ color: '#065f46', fontWeight: 600 }}>None</span>,
-      exp:   <>$2/mo <em style={{ opacity: 0.7 }}>for the whole salon (not per staff or client)</em></>,
-    },
-    {
-      label: 'Disputes / chargebacks',
-      std:   'You handle directly with Stripe',
-      exp:   'Plume coordinates',
-    },
-    {
-      label: 'Account ownership',
-      std:   <span style={{ color: '#065f46', fontWeight: 600 }}>You own it forever</span>,
-      exp:   'Plume owns it (sub-account)',
-    },
-    {
-      label: 'If you ever leave Plume',
-      std:   <span style={{ color: '#065f46', fontWeight: 600 }}>Keep your Stripe account</span>,
-      exp:   'Sub-account closes',
-    },
-  ];
-
-  const cellBase = {
-    padding: '8px 10px', fontSize: 12, lineHeight: 1.45,
-    borderBottom: '1px solid var(--pn-border)', verticalAlign: 'top',
-  };
-
-  return (
-    <details open style={{ marginBottom: 14, borderRadius: 10, border: '1px solid var(--pn-border)', background: 'var(--pn-bg)' }}>
-      <summary style={{ padding: '10px 14px', fontSize: 12, fontWeight: 600, color: '#6a4fa0', cursor: 'pointer', userSelect: 'none' }}>
-        Compare the two options side-by-side
-      </summary>
-      <div style={{ overflowX: 'auto', padding: '0 4px 10px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, color: 'var(--pn-text)' }}>
-          <thead>
-            <tr>
-              <th style={{ ...cellBase, textAlign: 'left', fontWeight: 700, color: '#6a4fa0', background: 'var(--pn-bg)', borderBottom: '2px solid var(--pn-border)', width: '32%' }}></th>
-              <th style={{ ...cellBase, textAlign: 'left', fontWeight: 700, color: 'var(--pn-success)', background: 'var(--pn-success-bg)', borderBottom: '2px solid #6ee7b7' }}>
-                ✓ Your own Stripe (Standard)
-              </th>
-              <th style={{ ...cellBase, textAlign: 'left', fontWeight: 700, color: 'var(--pn-text)', background: 'var(--pn-bg)', borderBottom: '2px solid var(--pn-border)' }}>
-                Plume-managed (Express)
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map(r => (
-              <tr key={r.label}>
-                <td style={{ ...cellBase, color: 'var(--pn-text-muted)', fontWeight: 600 }}>{r.label}</td>
-                <td style={cellBase}>{r.std}</td>
-                <td style={cellBase}>{r.exp}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ padding: '8px 10px 0', fontSize: 11, color: 'var(--pn-text-faint)' }}>
-          Rates set by Stripe ·{' '}
-          <a href="https://stripe.com/pricing" target="_blank" rel="noopener noreferrer" style={{ color: '#6a4fa0', textDecoration: 'underline' }}>stripe.com/pricing</a> ·{' '}
-          <a href="https://stripe.com/connect/pricing" target="_blank" rel="noopener noreferrer" style={{ color: '#6a4fa0', textDecoration: 'underline' }}>stripe.com/connect/pricing</a>
-        </div>
-      </div>
-    </details>
-  );
-}
 
 // Card-processing rates display. Same rates apply to both account
 // types (Stripe sets them); the footnote differs by accountType so
@@ -395,30 +304,6 @@ function StripeConnectStep({ stripeConnect, showToast, settings, updateSettings 
     }
   }
 
-  async function startStandard() {
-    setBusy(true); setErr('');
-    try {
-      // Pass our current origin so the server uses the SAME subdomain
-      // as the redirect target. Otherwise the server falls back to
-      // publicAppUrl and the user lands on a domain they're not
-      // authenticated on, breaking the callback.
-      const origin = (typeof window !== 'undefined') ? window.location.origin : undefined;
-      const { data } = await callFn('getStripeConnectOAuthUrl')({ tenantId: TENANT_ID, origin });
-      if (data?.url) {
-        // Stash where to re-open the wizard after the OAuth round-trip.
-        // AppShell's OAuth callback hook reads this and re-mounts the
-        // wizard at the same phase, so the salon owner sees the result
-        // inline instead of landing on the home tile grid.
-        sessionStorage.setItem('connect-return-to-wizard', 'money');
-        window.location.href = data.url;        // Stripe OAuth
-      } else {
-        throw new Error('No OAuth URL returned');
-      }
-    } catch (e) {
-      setErr(e.message || 'Failed to start Standard OAuth');
-      setBusy(false);
-    }
-  }
 
   // Resume an in-progress Express onboarding (account exists but Stripe
   // still needs more — e.g. bank account, ToS acceptance, ID upload).
@@ -586,63 +471,31 @@ function StripeConnectStep({ stripeConnect, showToast, settings, updateSettings 
       </div>
     );
   } else {
-    // Not connected: show the two-path picker
+    // Not connected: Plume-managed (Express) is the only path we offer — we
+    // create and run the payments account for the salon.
     body = (
     <div>
       <div style={{ fontSize: 13, color: 'var(--pn-text-muted)', lineHeight: 1.55, marginBottom: 12 }}>
-        You can take cards once Stripe is connected. Pick how you want to handle payments —
-        both work the same for charging customers; the difference is whether you ever have to
-        deal with stripe.com directly.
+        You can take cards as soon as payments are set up. We create and run the
+        payments account for you — no Stripe signup, and no separate login.
       </div>
 
-      <ConnectComparisonTable />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-        {/* Standard card — now recommended */}
-        <div style={{ border: '2px solid #6ee7b7', borderRadius: 10, padding: 14, background: 'var(--pn-success-bg)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: -10, right: 12,
-            background: '#065f46', color: '#fff', fontSize: 9, fontWeight: 700,
-            padding: '3px 8px', borderRadius: 8, letterSpacing: 0.5 }}>
-            RECOMMENDED
-          </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--pn-success)', marginBottom: 4 }}>✓ Your own Stripe account</div>
-          <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-            Connect (or create) a Stripe account in your salon's name. You own it,
-            you keep it if you ever leave Plume, and there's no per-payout fee.
-            <strong style={{ color: 'var(--pn-text)' }}> Best if you want the lowest cost and full control</strong> —
-            takes about 10 minutes to set up with Stripe.
-          </div>
-          <ul style={{ fontSize: 11, color: 'var(--pn-text-muted)', padding: '0 0 0 16px', margin: '0 0 10px', lineHeight: 1.7 }}>
-            <li>You own the merchant account</li>
-            <li>Full Stripe Dashboard at stripe.com</li>
-            <li>No per-payout fee</li>
-            <li>Stripe handles your disputes directly</li>
-          </ul>
-          <RateCard accountType="standard" color="var(--pn-success)" borderColor="#a7f3d0" background="rgba(255,255,255,0.7)" />
-          <button onClick={startStandard} disabled={busy} style={btnPrimary(busy)} type="button">
-            {busy ? 'Loading…' : 'Connect Stripe account'}
-          </button>
+      <div style={{ border: '1px solid var(--pn-border)', borderRadius: 10, padding: 14, background: 'var(--pn-surface)' }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 4 }}>Plume-managed payments</div>
+        <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+          No Stripe signup, no second login — we create and run the payments
+          account for you, you just start taking cards.
         </div>
-
-        {/* Express card — alternative */}
-        <div style={{ border: '1px solid var(--pn-border)', borderRadius: 10, padding: 14, background: 'var(--pn-surface)' }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 4 }}>Plume-managed · the hands-off option</div>
-          <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-            No Stripe signup, no second login — we create and run the payments
-            account for you, you just start taking cards.
-            <strong style={{ color: 'var(--pn-text)' }}> Best if you'd rather never deal with Stripe.</strong>
-          </div>
-          <ul style={{ fontSize: 11, color: 'var(--pn-text-muted)', padding: '0 0 0 16px', margin: '0 0 10px', lineHeight: 1.7 }}>
-            <li>No Stripe account to create — start taking cards in minutes</li>
-            <li>Everything inside Plume — no separate stripe.com login</li>
-            <li>We handle Stripe verification, updates &amp; disputes for you</li>
-            <li><strong style={{ color: 'var(--pn-text)' }}>~0.25% + $0.25 per payout + $2/mo</strong> — Stripe's fee, passed straight through (no Plume markup)</li>
-          </ul>
-          <RateCard accountType="express" color="var(--pn-text-muted)" borderColor="var(--pn-border)" background="var(--pn-bg)" />
-          <button onClick={startExpress} disabled={busy} style={btnSecondary} type="button">
-            {busy ? 'Loading…' : 'Use Plume-managed'}
-          </button>
-        </div>
+        <ul style={{ fontSize: 11, color: 'var(--pn-text-muted)', padding: '0 0 0 16px', margin: '0 0 10px', lineHeight: 1.7 }}>
+          <li>No Stripe account to create — start taking cards in minutes</li>
+          <li>Everything inside Plume — no separate stripe.com login</li>
+          <li>We handle Stripe verification, updates &amp; disputes for you</li>
+          <li><strong style={{ color: 'var(--pn-text)' }}>~0.25% + $0.25 per payout + $2/mo</strong> — Stripe's fee, passed straight through (no Plume markup)</li>
+        </ul>
+        <RateCard accountType="express" color="var(--pn-text-muted)" borderColor="var(--pn-border)" background="var(--pn-bg)" />
+        <button onClick={startExpress} disabled={busy} style={btnPrimary(busy)} type="button">
+          {busy ? 'Loading…' : 'Set up payments'}
+        </button>
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--pn-text-faint)', marginTop: 12, lineHeight: 1.5 }}>
