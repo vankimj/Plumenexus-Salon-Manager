@@ -4636,22 +4636,32 @@ async function _otpPepper(db) {
   catch { return (await ref.get()).data()?.pepper; }
 }
 
-// Generate, store (hashed), and text a fresh OTP. Returns the sendPlatformSms
-// result; callers decide whether a send failure is surfaced or swallowed (the
-// sign-in path swallows it to avoid an enumeration oracle).
-async function _issueAndSendOtp(db, otpRef, phone, cur, now, purpose) {
-  const code = phoneAuth.generateOtpCode();
-  const pepper = await _otpPepper(db);
-  await otpRef.set({
-    codeHash:  phoneAuth.hashOtp(code, phone, pepper),
-    expiresAt: new Date(now + phoneAuth.OTP_TTL_MS).toISOString(),
-    attempts:  0,
-    consumedAt: FieldValue.delete(),
-    purpose,
-    ...phoneAuth.nextSendAccounting(cur, now),
-    updatedAt: new Date(now).toISOString(),
-  }, { merge: true });
-  return sendPlatformSms({ to: phone, body: `Your Plume Nexus code is ${code}. It expires in 10 minutes. Don't share it with anyone.` });
+// Reserve a fresh OTP slot ATOMICALLY (the per-phone send gate + accounting +
+// code write in one transaction, so concurrent requests can't overshoot the
+// per-phone cap), then text the code. `awaitSend:false` fires the SMS without
+// blocking the response — used by the sign-in path so a linked number's slow
+// SMS round-trip can't become a timing oracle. Returns { sent, gate?, sendResult? }.
+async function _issueAndSendOtp(db, otpRef, phone, now, purpose, pepper, awaitSend = true) {
+  const reserve = await db.runTransaction(async (tx) => {
+    const cur = (await tx.get(otpRef)).data() || null;
+    const gate = phoneAuth.canSendOtp(cur, now);
+    if (!gate.allowed) return { sent: false, gate };
+    const code = phoneAuth.generateOtpCode();
+    tx.set(otpRef, {
+      codeHash:  phoneAuth.hashOtp(code, phone, pepper),
+      expiresAt: new Date(now + phoneAuth.OTP_TTL_MS).toISOString(),
+      attempts:  0,
+      consumedAt: FieldValue.delete(),
+      purpose,
+      ...phoneAuth.nextSendAccounting(cur, now),
+      updatedAt: new Date(now).toISOString(),
+    }, { merge: true });
+    return { sent: true, code };
+  });
+  if (!reserve.sent) return reserve;
+  const body = `Your Plume Nexus code is ${reserve.code}. It expires in 10 minutes. Don't share it with anyone.`;
+  if (!awaitSend) { sendPlatformSms({ to: phone, body }).catch(e => console.error('[requestPhoneOtp] async send failed:', e?.message)); return { sent: true }; }
+  return { sent: true, sendResult: await sendPlatformSms({ to: phone, body }) };
 }
 
 exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
@@ -4661,16 +4671,15 @@ exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
   const key = phoneAuth.phoneDocKey(phone);
   const otpRef = db.doc(`phoneAuthOtp/${key}`);
   const now = Date.now();
+  const pepper = await _otpPepper(db);
 
   // ── SIGN-IN intent (unauthenticated) ──────────────────────────────────────
-  // Every branch returns {ok:true} — no throw, no early-vs-late divergence — so
-  // linked and unlinked numbers are indistinguishable (no enumeration oracle).
+  // Every branch returns {ok:true} with no awaited SMS, so linked and unlinked
+  // numbers are indistinguishable by response shape OR timing (no enumeration).
   if (!request.auth) {
     const idx = await db.doc(`phoneAuthIndex/${key}`).get();
     if (!idx.exists) return { ok: true };
-    const cur = (await otpRef.get()).data() || null;
-    if (!phoneAuth.canSendOtp(cur, now).allowed) return { ok: true }; // silently throttle
-    await _issueAndSendOtp(db, otpRef, phone, cur, now, 'signin').catch(e => console.error('[requestPhoneOtp] signin send failed:', e?.message));
+    await _issueAndSendOtp(db, otpRef, phone, now, 'signin', pepper, false); // throttle handled inside, silently
     return { ok: true };
   }
 
@@ -4679,21 +4688,23 @@ exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
   const uid = request.auth.uid;
   // Per-CALLER cap (independent of the per-phone cap) so one authenticated
   // account can't spray OTPs across many numbers (SMS bombing / toll fraud).
+  // Atomic check-and-increment — a concurrent burst can't overshoot the cap.
   const quotaRef = db.doc(`phoneAuthSendQuota/${uid}`);
-  const q = (await quotaRef.get()).data() || null;
-  if (!phoneAuth.canSendOtp(q, now, { minIntervalMs: 0, maxPerWindow: 10, windowMs: 60 * 60 * 1000 }).allowed) {
-    throw new HttpsError('resource-exhausted', 'Too many attempts. Try again later.');
-  }
-  const cur = (await otpRef.get()).data() || null;
-  const pGate = phoneAuth.canSendOtp(cur, now);
-  if (!pGate.allowed) {
+  const quotaOk = await db.runTransaction(async (tx) => {
+    const q = (await tx.get(quotaRef)).data() || null;
+    if (!phoneAuth.canSendOtp(q, now, { minIntervalMs: 0, maxPerWindow: 10, windowMs: 60 * 60 * 1000 }).allowed) return false;
+    tx.set(quotaRef, phoneAuth.nextSendAccounting(q, now), { merge: true });
+    return true;
+  });
+  if (!quotaOk) throw new HttpsError('resource-exhausted', 'Too many attempts. Try again later.');
+
+  const out = await _issueAndSendOtp(db, otpRef, phone, now, 'link', pepper, true);
+  if (!out.sent) {
     throw new HttpsError('resource-exhausted',
-      pGate.reason === 'too_soon' ? 'Please wait a few seconds before requesting another code.' : 'Too many code requests. Try again later.',
-      { retryAfterMs: pGate.retryAfterMs });
+      out.gate?.reason === 'too_soon' ? 'Please wait a few seconds before requesting another code.' : 'Too many code requests. Try again later.',
+      { retryAfterMs: out.gate?.retryAfterMs });
   }
-  await quotaRef.set(phoneAuth.nextSendAccounting(q, now), { merge: true });
-  const r = await _issueAndSendOtp(db, otpRef, phone, cur, now, 'link');
-  if (!r.ok) { console.error('[requestPhoneOtp] link send failed:', r.error); throw new HttpsError('unavailable', "Couldn't send the code. Try again in a moment."); }
+  if (!out.sendResult?.ok) { console.error('[requestPhoneOtp] link send failed:', out.sendResult?.error); throw new HttpsError('unavailable', "Couldn't send the code. Try again in a moment."); }
   return { ok: true };
 });
 
