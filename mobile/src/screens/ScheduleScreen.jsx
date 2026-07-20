@@ -831,7 +831,7 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
         <Text style={styles.dayOffBody}>
           {off
             ? `You're off from ${off.startDate}${off.endDate && off.endDate !== off.startDate ? ` to ${off.endDate}` : ''}.`
-            : `Your schedule shows you don't work this day of the week. Update your work days on the employees page if that's wrong.`}
+            : `Your schedule shows you don't work this day of the week. Update your work days on the staff page if that's wrong.`}
         </Text>
       </View>
     );

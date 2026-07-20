@@ -105,7 +105,7 @@ export default function EmployeesAdmin() {
 
   async function handleSendInvite(emp) {
     if (!emp.email) {
-      showToast('Add an email to this employee first', 3000);
+      showToast('Add an email to this staff member first', 3000);
       return;
     }
     try {
@@ -133,7 +133,7 @@ export default function EmployeesAdmin() {
   }
 
 async function assignAllServicesToAll() {
-    if (!confirm(`Mark every employee as able to perform all ${services.length} services? You can fine-tune individual techs after.`)) return;
+    if (!confirm(`Mark every staff member as able to perform all ${services.length} services? You can fine-tune individual techs after.`)) return;
     const allIds = services.map(s => s.id);
     try {
       for (const emp of employees) {
@@ -159,7 +159,7 @@ async function assignAllServicesToAll() {
             {seeding ? 'Adding…' : '↺ Seed from defaults'}
           </Btn>
         )}
-        <TrashButton collections={['employees']} scope="Employees" />
+        <TrashButton collections={['employees']} scope="Staff" />
         <Btn color="#3D95CE" onClick={() => setEditing(blankEmployee())}>+ Add</Btn>
       </div>
 
@@ -167,9 +167,9 @@ async function assignAllServicesToAll() {
         <EmptyState
           icon="💇"
           title="Add your team"
-          description="Each tech / stylist / barber gets a profile here — name, photo, services they perform, and (admin-only) compensation. The schedule renders one column per active employee."
+          description="Each tech / stylist / barber gets a profile here — name, photo, services they perform, and (admin-only) compensation. The schedule renders one column per active staff member."
           actions={[
-            { label: '+ Add an employee',  onClick: () => setEditing(blankEmployee()) },
+            { label: '+ Add a staff member',  onClick: () => setEditing(blankEmployee()) },
             { label: '↺ Use sample staff', onClick: seedEmployees },
           ]}
         />
@@ -258,7 +258,7 @@ function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onTog
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         {emp.email && onSendInvite && (
           <button onClick={onSendInvite}
-            title={emp.inviteSentAt ? `Resend sign-in link (last sent ${new Date(emp.inviteSentAt).toLocaleDateString()})` : 'Send sign-in invite to this employee'}
+            title={emp.inviteSentAt ? `Resend sign-in link (last sent ${new Date(emp.inviteSentAt).toLocaleDateString()})` : 'Send sign-in invite to this staff member'}
             style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--pn-border)', background: emp.inviteSentAt ? 'var(--pn-surface-alt)' : 'var(--pn-surface)', color: '#6a4fa0', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
             {emp.inviteSentAt ? '↻ Resend' : '📨 Invite'}
           </button>
@@ -340,7 +340,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--pn-border)', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 600 }}>{isNew ? 'New Employee' : viewOnly ? (emp.name || 'Employee') : 'Edit Employee'}</span>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{isNew ? 'New Staff member' : viewOnly ? (emp.name || 'Staff member') : 'Edit Staff member'}</span>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid var(--pn-border-strong)', background: 'var(--pn-surface)', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         </div>
 
@@ -542,11 +542,11 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
                   </div>
                   {!linkedUser ? (
                     <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5 }}>
-                      No app access yet for this employee. Grant access from <strong>Admin → Users</strong> first; the toggle will appear here once they're a tech-role user.
+                      No app access yet for this staff member. Grant access from <strong>Admin → Users</strong> first; the toggle will appear here once they're a tech-role user.
                     </div>
                   ) : linkedUser.role !== 'tech' ? (
                     <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5 }}>
-                      This employee logs in as <strong>{linkedUser.role}</strong>. Schedule edit permission only applies to tech-role users — admins and schedulers can already edit any schedule.
+                      This staff member logs in as <strong>{linkedUser.role}</strong>. Schedule edit permission only applies to tech-role users — admins and schedulers can already edit any schedule.
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -709,7 +709,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               <button onClick={onClose} style={{ flex: 1, ...btnBase }}>Close</button>
               {!isNew && isAdmin && (
                 <button onClick={() => setRestoreOpen(true)}
-                  title="Restore an earlier version of this employee from the BigQuery mirror"
+                  title="Restore an earlier version of this staff member from the BigQuery mirror"
                   style={{ ...btnBase, padding: '8px 12px', fontSize: 12, color: 'var(--pn-text-muted)' }}>
                   ⏳ History
                 </button>
@@ -726,7 +726,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               <button onClick={onClose} style={{ flex: 1, ...btnBase }}>Cancel</button>
               <button onClick={submit} disabled={saving || !emp.name?.trim()}
                 style={{ flex: 2, ...btnBase, background: '#3D95CE', color: '#fff', borderColor: '#3D95CE', opacity: (saving || !emp.name?.trim()) ? .6 : 1 }}>
-                {saving ? 'Saving…' : isNew ? 'Add Employee' : 'Save'}
+                {saving ? 'Saving…' : isNew ? 'Add Staff member' : 'Save'}
               </button>
             </>
           )}

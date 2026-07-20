@@ -169,7 +169,7 @@ export default function ProfileScreen({ navigation }) {
   // (mobile profile screen requires an employee for self-edit anyway).
   const pickAndUploadPhoto = useCallback(async (source /* 'camera' | 'library' */) => {
     if (!employee?.id) {
-      Alert.alert('No employee record', 'Ask an admin to add you to the employees list first.');
+      Alert.alert('No staff record', 'Ask an admin to add you to the staff list first.');
       return;
     }
     try {
@@ -446,7 +446,7 @@ export default function ProfileScreen({ navigation }) {
           {!employee && (
             <View style={styles.warningPill}>
               <Text style={styles.warningPillText}>
-                No employee record linked to this account
+                No staff record linked to this account
               </Text>
             </View>
           )}
@@ -816,7 +816,7 @@ function AddTimeOffModal({ open, onClose, onSaved, techName }) {
 
   async function save() {
     if (!valid || saving) return;
-    if (!techName) { Alert.alert('No tech', 'Need an employee record to attribute time off to.'); return; }
+    if (!techName) { Alert.alert('No tech', 'Need a staff record to attribute time off to.'); return; }
     setSaving(true);
     try {
       await createTimeOff({ techName, startDate, endDate, type, reason: reason.trim() });

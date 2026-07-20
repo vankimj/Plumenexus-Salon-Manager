@@ -49,7 +49,7 @@ export default function SlideModal({ editIndex, onClose }) {
       }
     }
     const filled = [emp.name, emp.venmo, emp.instagram, emp.facebook, emp.homepage, emp.photo].filter(Boolean).length;
-    showToast(filled <= 1 ? `Imported ${emp.name} — add a photo and social handles in their employee profile` : `Imported from ${emp.name}`);
+    showToast(filled <= 1 ? `Imported ${emp.name} — add a photo and social handles in their staff profile` : `Imported from ${emp.name}`);
   }
 
   async function handleFile(e) {
@@ -89,11 +89,11 @@ export default function SlideModal({ editIndex, onClose }) {
         {/* Import from employee */}
         {employees.length > 0 && (
           <div style={{ background: '#f0f7ff', border: '1px solid #c7dff7', borderRadius: 10, padding: '10px 12px', marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#1a5f8a', marginBottom: 6 }}>↓ Import from employee</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#1a5f8a', marginBottom: 6 }}>↓ Import from staff member</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <select value={pickEmp} onChange={e => setPickEmp(e.target.value)}
                 style={{ flex: 1, fontFamily: 'inherit', border: '1px solid #c7dff7', borderRadius: 8, padding: '7px 10px', fontSize: 13, color: '#333', outline: 'none', background: '#fff' }}>
-                <option value="">Pick employee…</option>
+                <option value="">Pick staff member…</option>
                 {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
               <button onClick={importEmployee} disabled={!pickEmp}
@@ -102,7 +102,7 @@ export default function SlideModal({ editIndex, onClose }) {
               </button>
             </div>
             <div style={{ fontSize: 10, color: '#5a8fba', marginTop: 5 }}>
-              Fills name, photo, Venmo, Instagram, Facebook, homepage from employee record.
+              Fills name, photo, Venmo, Instagram, Facebook, homepage from staff record.
             </div>
           </div>
         )}

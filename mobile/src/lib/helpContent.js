@@ -74,7 +74,7 @@ export const HELP_TOPICS = {
       '“Walk-in turn weight” controls how much of a turn it counts (full set = 1, fill = 0.5, etc.).',
       'Mark inactive to hide a service without deleting it.',
     ],
-    tip: 'Set each tech’s “Services performed” in Employees so walk-in routing knows who can do what.',
+    tip: 'Set each tech’s “Services performed” in Staff so walk-in routing knows who can do what.',
   },
   products: {
     icon: 'box', what: 'Retail inventory + stock.',
@@ -162,7 +162,7 @@ export const HELP_FEATURES = [
     steps: [
       'Manage → Clock Kiosk (admins only). It locks the device.',
       'Two tiles: Time Clock (techs tap their tile → PIN → clock in/out) and Walk-in Monitor (live rotation + waitlist, read-only).',
-      'Each tech’s PIN is set in Employees; clock events alert admins and update Attendance.',
+      'Each tech’s PIN is set in Staff; clock events alert admins and update Attendance.',
       'Exit requires an admin’s kiosk PIN.',
     ],
     tip: 'Run the Walk-in Monitor on a spare screen so techs can see the rotation at a glance.',

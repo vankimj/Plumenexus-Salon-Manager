@@ -1216,9 +1216,9 @@ function NewReviewModal({ existing, employees, onSave, onClose }) {
 
           {/* Employee */}
           <div>
-            <label style={{ fontSize: 11, color: 'var(--pn-text-muted)', display: 'block', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Employee</label>
+            <label style={{ fontSize: 11, color: 'var(--pn-text-muted)', display: 'block', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Staff member</label>
             <select value={empId} onChange={e => setEmpId(e.target.value)} style={inp}>
-              <option value="">Select employee…</option>
+              <option value="">Select staff member…</option>
               {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </div>
@@ -1258,7 +1258,7 @@ function NewReviewModal({ existing, employees, onSave, onClose }) {
                 ))}
               </div>
             ) : !metricsLoading ? (
-              <div style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>Select an employee and period to load metrics.</div>
+              <div style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>Select a staff member and period to load metrics.</div>
             ) : null}
           </div>
 
@@ -1388,14 +1388,14 @@ function HandbookTab({ employees }) {
 
   async function sendAllReminders() {
     const unsigned = employees.filter(e => e.email && !sigs.find(s => s.version === doc.version && s.email === e.email));
-    if (!unsigned.length) { showToast('All employees have signed!'); return; }
+    if (!unsigned.length) { showToast('All staff have signed!'); return; }
     setSending('all');
     try {
       for (const emp of unsigned) {
         await sendHandbookReminderNotif(emp.name, doc.title, doc.version);
       }
       logActivity('handbook_reminder_sent', `bulk – ${unsigned.length} recipients`);
-      showToast(`Reminders sent to ${unsigned.length} employee(s)`);
+      showToast(`Reminders sent to ${unsigned.length} staff member(s)`);
     } catch (e) {
       showToast('Send failed: ' + e.message, 4000);
     } finally { setSending(null); }
@@ -1481,7 +1481,7 @@ function HandbookTab({ employees }) {
         </div>
 
         {employees.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 24, color: 'var(--pn-text-faint)', fontSize: 13 }}>No employees on record.</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--pn-text-faint)', fontSize: 13 }}>No staff on record.</div>
         ) : employees.map((emp, i) => {
           const sig    = emp.email ? sigByEmail[emp.email] : null;
           const signed = sig?.version === doc.version;
@@ -1808,7 +1808,7 @@ function GustoTab({ employees, payrollRuns }) {
     try {
       const { data } = await gustoSyncEmployeesFn();
       setSyncResult(data);
-      showToast(`Synced ${data.updated} employee${data.updated !== 1 ? 's' : ''} from Gusto`);
+      showToast(`Synced ${data.updated} staff member${data.updated !== 1 ? 's' : ''} from Gusto`);
       logActivity('gusto_sync_employees', `matched ${data.matched}, updated ${data.updated}`);
     } catch (e) {
       showToast('Sync failed: ' + e.message, 4000);
@@ -1849,7 +1849,7 @@ function GustoTab({ employees, payrollRuns }) {
           {isConnected ? (
             <button onClick={handleSync} disabled={syncing}
               style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--pn-border-strong)', background: syncing ? 'var(--pn-surface-alt)' : 'var(--pn-surface-muted)', color: 'var(--pn-text-muted)', fontSize: 12, fontWeight: 600, cursor: syncing ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-              {syncing ? 'Syncing…' : '↺ Sync Employees'}
+              {syncing ? 'Syncing…' : '↺ Sync Staff'}
             </button>
           ) : (
             <button onClick={handleConnect} disabled={connecting}
@@ -1861,7 +1861,7 @@ function GustoTab({ employees, payrollRuns }) {
 
         {syncResult && (
           <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--pn-success-bg)', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: 'var(--pn-success)' }}>
-            Sync complete — {syncResult.matched} employees matched, {syncResult.updated} updated with Gusto IDs.
+            Sync complete — {syncResult.matched} staff matched, {syncResult.updated} updated with Gusto IDs.
           </div>
         )}
       </div>
@@ -1870,7 +1870,7 @@ function GustoTab({ employees, payrollRuns }) {
       {isConnected && (
         <div style={{ background: 'var(--pn-surface)', border: '1px solid var(--pn-border)', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--pn-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--pn-text-muted)' }}>Employee sync status</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--pn-text-muted)' }}>Staff sync status</span>
             <span style={{ fontSize: 11, color: 'var(--pn-text-faint)' }}>{gustoMatchedEmps.length}/{employees.length} matched</span>
           </div>
           {employees.map((e, i) => (
@@ -1916,7 +1916,7 @@ function GustoTab({ employees, payrollRuns }) {
 
       {!isConnected && (
         <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--pn-text-faint)', fontSize: 13 }}>
-          Connect Gusto above to sync employees and submit payroll runs automatically.
+          Connect Gusto above to sync staff and submit payroll runs automatically.
         </div>
       )}
     </div>
@@ -2100,9 +2100,9 @@ function EditCEModal({ seed, employees, isTech, myTechName, myUid, onSave, onClo
 
         <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
           {!isTech && (
-            <Field label="Employee">
+            <Field label="Staff member">
               <select value={empId} onChange={e => setEmpId(e.target.value)} style={inp}>
-                <option value="">Select employee…</option>
+                <option value="">Select staff member…</option>
                 {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
             </Field>

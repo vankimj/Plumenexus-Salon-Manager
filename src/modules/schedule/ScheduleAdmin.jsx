@@ -3787,13 +3787,13 @@ function NoTechsEmptyState() {
     }}>
       <div style={{ fontSize: 56, marginBottom: 12, opacity: 0.7 }}>👥</div>
       <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 6 }}>
-        No employees yet
+        No staff yet
       </div>
       <div style={{ fontSize: 13, color: 'var(--pn-text-muted)', maxWidth: 380, margin: '0 auto 18px', lineHeight: 1.55 }}>
-        Add your first employee to start booking appointments. Each employee shows up as a column in the day grid.
+        Add your first staff member to start booking appointments. Each staff member shows up as a column in the day grid.
       </div>
       <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', fontStyle: 'italic' }}>
-        Open <strong>Employees</strong> from the sidebar to add one.
+        Open <strong>Staff</strong> from the sidebar to add one.
       </div>
     </div>
   );
@@ -4678,7 +4678,7 @@ function HoursModal({ settings, updateSettings, onClose }) {
               "Can be booked outside store hours"), not one salon-wide window. */}
           <div style={{ marginTop: 16, padding: '12px', background: 'var(--pn-info-bg)', borderRadius: 10, border: '1px solid #c7dff7' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pn-info)', marginBottom: 4 }}>Appointment-only hours</div>
-            <div style={{ fontSize: 11, color: 'var(--pn-info)', lineHeight: 1.5 }}>Now set <strong>per tech</strong> — open a tech in <strong>Employees</strong> and turn on “Can be booked outside store hours (appointment-only).” Each tech's window defaults to your store hours.</div>
+            <div style={{ fontSize: 11, color: 'var(--pn-info)', lineHeight: 1.5 }}>Now set <strong>per tech</strong> — open a tech in <strong>Staff</strong> and turn on “Can be booked outside store hours (appointment-only).” Each tech's window defaults to your store hours.</div>
           </div>
 
           {/* Late check-in alert */}

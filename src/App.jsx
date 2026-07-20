@@ -69,7 +69,7 @@ const MODULE_TITLES = {
   schedule:   'Schedule',
   clients:    'Clients',
   services:   'Services',
-  employees:  'Employees',
+  employees:  'Staff',
   reports:    'Reports',
   receipts:   'Sales & Receipts',
   attendance: 'Attendance',

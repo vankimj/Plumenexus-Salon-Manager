@@ -19,7 +19,7 @@ export const MODULES = [
   { id: 'schedule',    label: 'Schedule',         desc: 'Appointments & calendar',           plan: 'starter', adminOnly: false, cap: 'schedule'         },
   { id: 'clients',     label: 'Clients',          desc: 'Profiles & visit history',          plan: 'starter', adminOnly: false, cap: 'clients'          },
   { id: 'services',    label: 'Services',         desc: 'Menu & pricing',                    plan: 'starter', adminOnly: false, cap: 'services_edit'    },
-  { id: 'employees',   label: 'Employees',        desc: 'Team & profiles',                   plan: 'starter', adminOnly: true,  cap: 'employees'        },
+  { id: 'employees',   label: 'Staff',            desc: 'Team & profiles',                   plan: 'starter', adminOnly: true,  cap: 'employees'        },
   { id: 'walkin',      label: 'Walk-in Manager',  desc: 'Turn rotation + waitlist',          plan: 'starter', adminOnly: false, cap: 'walkin'           },
 
   // ── Studio ─
