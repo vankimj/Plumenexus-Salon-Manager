@@ -10,6 +10,7 @@ import { useApp } from '../../context/AppContext';
 import { logActivity, logError } from '../../lib/logger';
 import { subscribeLocations, isMultiLocation, activeLocations, DEFAULT_LOCATION_ID } from '../../lib/locations';
 import EmptyState from '../../components/EmptyState';
+import StaffImportModal from './StaffImportModal';
 
 
 const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -41,6 +42,7 @@ export default function EmployeesAdmin() {
   const [editing,   setEditing]   = useState(null);
   const [viewing,   setViewing]   = useState(null);
   const [seeding,   setSeeding]   = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -160,8 +162,18 @@ async function assignAllServicesToAll() {
           </Btn>
         )}
         <TrashButton collections={['employees']} scope="Staff" />
+        <Btn color="#3D9E8A" onClick={() => setImporting(true)}>📷 Import from screenshots</Btn>
         <Btn color="#3D95CE" onClick={() => setEditing(blankEmployee())}>+ Add</Btn>
       </div>
+
+      {importing && (
+        <StaffImportModal
+          existingNames={employees.map(e => e.name)}
+          nextSortOrder={employees.length}
+          onClose={() => setImporting(false)}
+          onCreated={() => { setImporting(false); load(); }}
+        />
+      )}
 
       {employees.length === 0 ? (
         <EmptyState
@@ -170,6 +182,7 @@ async function assignAllServicesToAll() {
           description="Each tech / stylist / barber gets a profile here — name, photo, services they perform, and (admin-only) compensation. The schedule renders one column per active staff member."
           actions={[
             { label: '+ Add a staff member',  onClick: () => setEditing(blankEmployee()) },
+            { label: '📷 Import from screenshots', onClick: () => setImporting(true) },
             { label: '↺ Use sample staff', onClick: seedEmployees },
           ]}
         />
