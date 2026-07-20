@@ -72,6 +72,14 @@ export function clockedInNameSet(attendance) {
   return set;
 }
 
+// The subset of `techNames` (in their original casing) whose employee is
+// currently clocked in. Powers the calendar's "Working now" filter — maps the
+// normalized clocked-in names back to the exact tech-column names.
+export function workingTechNames(techNames, attendance) {
+  const inSet = clockedInNameSet(attendance);
+  return (techNames || []).filter(t => inSet.has(norm(t)));
+}
+
 export function offClockTechNames(techNames, attendance) {
   const inSet = clockedInNameSet(attendance);
   const seen = new Set();

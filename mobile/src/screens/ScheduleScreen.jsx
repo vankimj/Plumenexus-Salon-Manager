@@ -10,7 +10,7 @@ import {
   softDeleteRecurringSeries, fetchSettings, fetchAttendance, notifyAppointmentCancelled,
   createTimeOff, deleteTimeOff,
 } from '../lib/firestore';
-import { isSalonOpenNow, clockedInNameSet, attendanceKey, bookableWindow } from '../lib/shiftGate';
+import { isSalonOpenNow, clockedInNameSet, workingTechNames, attendanceKey, bookableWindow } from '../lib/shiftGate';
 import { notifyAffectedTechs } from '../lib/notifications';
 import { addApptToTab, removeApptFromTab, getCurrentTab, tabCount, tabTotal, subscribeTab, clearTab } from '../lib/currentTab';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
@@ -405,6 +405,14 @@ export default function ScheduleScreen({ navigation }) {
   // "multi-tech layout" — true unless we're scoped to exactly the user's own.
   const showAll = !ownOnly;
 
+  // "Working now" filter — the tech columns whose staff is currently clocked in
+  // (attendance is already loaded for the clock-in gate). Tapping the chip scopes
+  // the grid to exactly those; `workingNow` marks the chip active when the
+  // current selection equals that set.
+  const workingTechs = useMemo(() => workingTechNames(allTechs, attendance), [allTechs, attendance]);
+  const workingNow = canSeeAll && workingTechs.length > 0
+    && selectedTechs.size === workingTechs.length && workingTechs.every(t => selectedTechs.has(t));
+
   const filtered = useMemo(() => {
     if (everyone) return appts;                 // admin viewing everyone — include blank-tech appts too
     return appts.filter(a => visibleSet.has(a.techName || ''));
@@ -517,6 +525,15 @@ export default function ScheduleScreen({ navigation }) {
                 <Text style={ownOnly ? styles.chipBlueText : styles.chipMutedText}>👤 Just me</Text>
               </TouchableOpacity>
             )}
+            <TouchableOpacity
+              style={[styles.chip, workingNow ? styles.chipBlue : styles.chipMuted]}
+              onPress={() => {
+                if (!workingTechs.length) { Alert.alert('Working now', 'No one is clocked in right now.'); return; }
+                setSelectedTechs(new Set(workingTechs));
+              }}
+            >
+              <Text style={workingNow ? styles.chipBlueText : styles.chipMutedText}>🟢 Working now</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
