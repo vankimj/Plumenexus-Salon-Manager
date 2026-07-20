@@ -41,7 +41,7 @@ export const MODULES = [
   { id: 'schedule',    label: 'Schedule',         desc: 'Appointments & calendar',           plan: 'solo',    adminOnly: false, cap: 'schedule',         group: 'core'  },
   { id: 'clients',     label: 'Clients',          desc: 'Profiles & visit history',          plan: 'solo',    adminOnly: false, cap: 'clients',          group: 'core'  },
   { id: 'services',    label: 'Services',         desc: 'Menu & pricing',                    plan: 'solo',    adminOnly: false, cap: 'services_edit',     group: 'core'  },
-  { id: 'employees',   label: 'Employees',        desc: 'Team & profiles',                   plan: 'solo',    adminOnly: true,  cap: 'employees',        group: 'admin' },
+  { id: 'employees',   label: 'Staff',            desc: 'Team & profiles',                   plan: 'solo',    adminOnly: true,  cap: 'employees',        group: 'admin' },
   { id: 'walkin',      label: 'Walk-in Manager',  desc: 'Turn rotation + waitlist',          plan: 'solo',    adminOnly: false, cap: 'walkin',           group: 'grow', hideForVerticals: ['personalTraining'] },
   { id: 'reports',     label: 'Reports',          desc: 'Revenue & analytics + AI assistant', plan: 'solo',   adminOnly: false, cap: 'reports',          group: 'core'  },
   { id: 'receipts',    label: 'Sales & Receipts', desc: 'Browse, search, resend & refund sales', plan: 'solo', adminOnly: false, cap: 'reports',         group: 'core'  },

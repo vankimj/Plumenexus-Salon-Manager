@@ -203,7 +203,7 @@ export default function OnboardingScreen() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--pn-text)', marginBottom: 10 }}>Getting started</div>
                 {[
                   ['1', 'Visit your URL and sign in with Google using ' + ownerEmail],
-                  ['2', 'Add your employees under the Employees module'],
+                  ['2', 'Add your staff under the Staff module'],
                   ['3', 'Set up your service menu'],
                   ['4', 'Configure your public booking page (Admin → Settings)'],
                   ['5', 'Customise your public website (Admin → Webfront)'],

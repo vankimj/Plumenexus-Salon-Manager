@@ -964,7 +964,7 @@ function MeetingModal({ existing, draft, employees, onSave, onClose, author }) {
                 <label style={lbl}>Participants (receive email reminders)</label>
                 <div style={{ background: 'var(--pn-bg)', borderRadius: 10, border: '1px solid var(--pn-border)', padding: '10px 12px', maxHeight: 200, overflowY: 'auto' }}>
                   {employees.length === 0 ? (
-                    <div style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>No employees on record.</div>
+                    <div style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>No staff on record.</div>
                   ) : employees.map(emp => {
                     const key     = `${emp.name}||${emp.email || ''}`;
                     const checked = selected.includes(key);

@@ -114,7 +114,7 @@ export default function EmployeesScreen({ navigation }) {
         return [e.email, e.phone].filter(Boolean).join(' · ')
           || (n ? `${n} service${n === 1 ? '' : 's'}` : (e.active === false ? 'inactive' : '—'));
       }}
-      addLabel="New employee"
+      addLabel="New staff member"
     />
   );
 }
