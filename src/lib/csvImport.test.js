@@ -196,12 +196,22 @@ describe('mergeAppointmentRows', () => {
     expect(merged).toHaveLength(1);
   });
 
-  it('a non-cancelled row wins over a cancelled one for status', () => {
+  it('cancelled/no-show rows bucket separately from live rows in the same slot', () => {
     const merged = mergeAppointmentRows([
       row({ status: 'cancelled' }),
       row({ status: 'scheduled' }),
+      row({ status: 'no_show' }),
     ]);
-    expect(merged[0].status).toBe('scheduled');
+    expect(merged).toHaveLength(3);
+    expect(merged.map(m => m.status).sort()).toEqual(['cancelled', 'no_show', 'scheduled']);
+  });
+
+  it('collapses internal whitespace runs when matching names', () => {
+    const merged = mergeAppointmentRows([
+      row(),
+      row({ clientName: 'Jane  Doe', techName: 'Yasmin ' }),
+    ]);
+    expect(merged).toHaveLength(1);
   });
 
   it('concatenates distinct notes, skips duplicate notes', () => {
@@ -231,6 +241,12 @@ describe('normalizeApptTechNames', () => {
     const appts = [{ techName: 'Departed Tech' }, { techName: 'TBD' }];
     normalizeApptTechNames(appts, ['Yasmin D']);
     expect(appts.map(a => a.techName)).toEqual(['Departed Tech', 'TBD']);
+  });
+
+  it('matches despite internal double spaces in the CSV name', () => {
+    const appts = [{ techName: 'Yasmin  D' }];
+    normalizeApptTechNames(appts, ['Yasmin D']);
+    expect(appts[0].techName).toBe('Yasmin D');
   });
 
   it('tolerates empty roster and empty appts', () => {

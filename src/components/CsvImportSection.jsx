@@ -115,6 +115,7 @@ export default function CsvImportSection({ onBusyChange }) {
 
   async function runImportClients() {
     if (!clientsFile) return;
+    if (running) { showToast('Another import is already running — wait for it to finish or cancel it first.', 3500); return; }
     if (!window.confirm(`Import ${clientsFile.mapped.length} contacts from ${clientsFile.fileName}?\n\nDuplicates already in the DB (by name) will be detected and skipped. Tagged as imported from GlossGenius.`)) return;
 
     setRunning('clients');
@@ -255,6 +256,7 @@ export default function CsvImportSection({ onBusyChange }) {
 
   async function runImportReceipts() {
     if (!paymentsFile || !lineItemsFile) return;
+    if (running) { showToast('Another import is already running — wait for it to finish or cancel it first.', 3500); return; }
     const preview = buildReceiptsFromGg(paymentsFile.records, lineItemsFile.records, {});
     if (!window.confirm(`Import ${preview.length} receipts joined from ${paymentsFile.fileName} + ${lineItemsFile.fileName}?\n\nReceipts include services, products, tip, tax, payment method, and processing fee. Duplicates (same Payment Transaction ID already in the DB) will be skipped automatically. Tagged as imported from GlossGenius.`)) return;
 
@@ -375,7 +377,8 @@ export default function CsvImportSection({ onBusyChange }) {
 
   async function runImportAppointments() {
     if (!apptsFile) return;
-    if (!window.confirm(`Import ${apptsFile.mapped.length} appointments from ${apptsFile.fileName}?\n\nThey appear on the Schedule calendar. Duplicates (same date, time, client, tech + service already in the DB) will be skipped. Tagged as imported from GlossGenius.`)) return;
+    if (running) { showToast('Another import is already running — wait for it to finish or cancel it first.', 3500); return; }
+    if (!window.confirm(`Import ${apptsFile.mapped.length} appointments from ${apptsFile.fileName}?\n\nThey appear on the Schedule calendar. Duplicates (same date, time, client + tech already in the DB) will be skipped. Tagged as imported from GlossGenius.`)) return;
 
     setRunning('appointments');
     setSkipped(null);
@@ -385,10 +388,15 @@ export default function CsvImportSection({ onBusyChange }) {
     const skippedRows = [];
     try {
       setProgress('Loading client lookup + dedup index…');
+      // Dedup index + roster are load-bearing: a swallowed failure here means
+      // thousands of duplicate appointments or a mass former-staff creation on
+      // re-import. Let a rejection abort before any write — nothing is
+      // half-imported and the outer catch surfaces it. Client lookup stays
+      // best-effort (only affects linking).
       const [fresh, existingKeys, existingEmps] = await Promise.all([
         fetchClients().catch(() => []),
-        fetchExistingApptKeys().catch(() => new Set()),
-        fetchEmployees().catch(() => []),
+        fetchExistingApptKeys(),
+        fetchEmployees(),
       ]);
       const lookup = {};
       fresh.forEach(c => { if (c.name) lookup[clientKey(c.name)] = c.id; });
@@ -398,8 +406,11 @@ export default function CsvImportSection({ onBusyChange }) {
       );
       setProgressNum({ current: 0, total: appts.length, label: 'appointments' });
 
+      // Live rows claim a slot before their cancelled/no-show twins so a
+      // cancel-then-rebook slot always keeps the live booking.
+      const liveRank = (a) => (a.status === 'cancelled' || a.status === 'no_show') ? 1 : 0;
       const toImport = [];
-      for (const a of appts) {
+      for (const a of [...appts].sort((x, y) => liveRank(x) - liveRank(y))) {
         const key = apptDedupKey(a);
         if (existingKeys.has(key)) {
           skippedRows.push({
@@ -447,13 +458,17 @@ export default function CsvImportSection({ onBusyChange }) {
 
       setProgress('');
       const linked = appts.filter(a => a.clientId).length;
-      const today = new Date().toISOString().slice(0, 10);
+      // Local calendar date — appointment dates are salon-local strings, and
+      // toISOString() would flip the day for evening imports west of UTC.
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const upcoming = toImport.filter(a => a.date >= today).length;
+      const noTech = toImport.filter(a => a.techName === 'TBD').length;
       if (cancelled) {
         setProgress(`Cancelled at ${count + skippedRows.length}/${appts.length}. Already-imported appointments stay; you can re-run safely (dedup will skip them).`);
         showToast(`Cancelled · ${count} appointments imported before stop`, 3500);
       } else {
-        setApptsResult({ imported: count, skipped: skippedRows.length, linked, total: appts.length, upcoming, unmatched });
+        setApptsResult({ imported: count, skipped: skippedRows.length, linked, total: appts.length, upcoming, unmatched, noTech });
         showToast(`✓ Step 4: ${count} appointments imported · ${skippedRows.length} duplicates skipped`, 3500);
       }
       if (skippedRows.length > 0) setSkipped({ type: 'appointments', rows: skippedRows, fileName: apptsFile.fileName });
@@ -550,8 +565,8 @@ export default function CsvImportSection({ onBusyChange }) {
             <PreviewBlock file={clientsFile} type="clients" rows={clientsFile.mapped} />
           )}
           {clientsFile && !step1Done && (
-            <button onClick={runImportClients} disabled={busyClients}
-              style={primaryBtn(busyClients || step1Done)}>
+            <button onClick={runImportClients} disabled={running !== null}
+              style={primaryBtn(running !== null || step1Done)}>
               {busyClients ? 'Importing…' : `Import ${clientsFile.mapped.length} contacts`}
             </button>
           )}
@@ -615,8 +630,8 @@ export default function CsvImportSection({ onBusyChange }) {
                 />
               )}
               {joinedReceipts && !step3Done && (
-                <button onClick={runImportReceipts} disabled={busyReceipts}
-                  style={primaryBtn(busyReceipts)}>
+                <button onClick={runImportReceipts} disabled={running !== null}
+                  style={primaryBtn(running !== null)}>
                   {busyReceipts ? 'Importing…' : `Import ${joinedReceipts.length} receipts`}
                 </button>
               )}
@@ -649,8 +664,8 @@ export default function CsvImportSection({ onBusyChange }) {
                 <PreviewBlock file={apptsFile} type="appointments" rows={apptsFile.mapped} />
               )}
               {apptsFile && !step4Done && (
-                <button onClick={runImportAppointments} disabled={busyAppts}
-                  style={primaryBtn(busyAppts)}>
+                <button onClick={runImportAppointments} disabled={running !== null}
+                  style={primaryBtn(running !== null)}>
                   {busyAppts ? 'Importing…' : `Import ${apptsFile.mapped.length} appointments`}
                 </button>
               )}
@@ -660,6 +675,11 @@ export default function CsvImportSection({ onBusyChange }) {
                   {apptsResult.unmatched.length > 0 && (
                     <div style={{ fontSize: 11, color: 'var(--pn-warning)', background: 'var(--pn-warning-bg)', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: 6, marginTop: 6, lineHeight: 1.5 }}>
                       ⚠ {apptsResult.unmatched.length} staff name{apptsResult.unmatched.length !== 1 ? 's' : ''} from the CSV {apptsResult.unmatched.length !== 1 ? "aren't" : "isn't"} on your roster (added as disabled): <strong>{apptsResult.unmatched.join(', ')}</strong>. Their appointments won't show on the calendar until that staff member is enabled in Staff.
+                    </div>
+                  )}
+                  {apptsResult.noTech > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--pn-warning)', background: 'var(--pn-warning-bg)', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: 6, marginTop: 6, lineHeight: 1.5 }}>
+                      ⚠ {apptsResult.noTech} appointment{apptsResult.noTech !== 1 ? 's' : ''} had no provider in the CSV and imported as "TBD" — they won't appear in a tech column on the calendar until you open them and assign a tech.
                     </div>
                   )}
                 </>

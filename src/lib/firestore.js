@@ -1844,19 +1844,25 @@ export async function fetchExistingClientNameKeys() {
 }
 
 // Synthetic key for an appointment row — used to dedup re-imports of the GG
-// Appointments CSV. Matches the importer's expected fields.
-function apptDedupKey({ date, startTime, clientName, techName, services }) {
+// Appointments CSV. One appointment per date+time+client+tech slot (the same
+// invariant mergeAppointmentRows enforces); service names stay OUT of the key
+// because GG's per-service row order isn't stable across exports.
+function apptDedupKey({ date, startTime, clientName, techName }) {
   const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const svcName = norm(services?.[0]?.name);
-  return `${date || ''}|${startTime || ''}|${norm(clientName)}|${norm(techName)}|${svcName}`;
+  return `${date || ''}|${startTime || ''}|${norm(clientName)}|${norm(techName)}`;
 }
 export { apptDedupKey };
 
 // Returns a Set of dedup keys for every appointment already in the DB.
+// Tombstoned (soft-deleted) appts don't count — deleting a bad import then
+// re-running must bring the rows back.
 export async function fetchExistingApptKeys() {
   const snap = await getDocs(APPTS_COL);
   const set = new Set();
-  snap.docs.forEach(d => set.add(apptDedupKey(d.data())));
+  snap.docs.forEach(d => {
+    const data = d.data();
+    if (notTombstoned(data)) set.add(apptDedupKey(data));
+  });
   return set;
 }
 

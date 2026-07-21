@@ -195,6 +195,10 @@ export function buildReceiptsFromGg(payments, lineItems, clientLookup) {
 // Non-tech placeholders that should never become a staff record.
 const NON_TECH = new Set(['', 'walk-in', 'walkin', 'walk in', 'tbd', 'n/a', 'na', 'none', 'unknown', 'front desk']);
 
+// Case/whitespace-insensitive name key — collapses internal runs of spaces so
+// a CSV's 'Yasmin  D' matches roster 'Yasmin D' (parseCsv only trims edges).
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
 // Distinct real tech names referenced by a set of receipts — receipt-level,
 // per-service, and any techSplit. Splits comma-joined multi-provider strings,
 // skips blanks/placeholders, dedupes case-insensitively (first spelling wins),
@@ -203,7 +207,7 @@ export function collectTechNames(receipts) {
   const seen = new Map(); // normalized -> original
   const add = (raw) => String(raw || '').split(',').forEach(part => {
     const name = part.trim();
-    const key = name.toLowerCase();
+    const key = normName(name);
     if (!name || NON_TECH.has(key) || seen.has(key)) return;
     seen.set(key, name);
   });
@@ -219,26 +223,27 @@ export function collectTechNames(receipts) {
 // These get auto-created as disabled "likely former staff" so historical revenue
 // stays attributed without cluttering the active roster.
 export function missingTechNames(referenced, existingNames) {
-  const have = new Set((existingNames || []).map(n => String(n || '').trim().toLowerCase()));
-  return (referenced || []).filter(n => !have.has(String(n).trim().toLowerCase()));
+  const have = new Set((existingNames || []).map(normName));
+  return (referenced || []).filter(n => !have.has(normName(n)));
 }
 
 // GG's Appointments CSV has one row per service line, so a multi-service
 // booking arrives as several rows sharing date + start time + client + tech.
 // Merge those into one appointment (services concatenated, duration summed)
-// or the calendar would show overlapping duplicate blocks.
+// or the calendar would show overlapping duplicate blocks. Cancelled/no-show
+// rows bucket separately — a client who cancelled a slot then rebooked it
+// must not have the live booking absorbed into the dead one (or vice versa).
 export function mergeAppointmentRows(rows) {
-  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const byKey = new Map();
   const out = [];
   for (const a of rows || []) {
-    const key = `${a.date}|${a.startTime}|${norm(a.clientName)}|${norm(a.techName)}`;
+    const bucket = (a.status === 'cancelled' || a.status === 'no_show') ? a.status : 'live';
+    const key = `${a.date}|${a.startTime}|${normName(a.clientName)}|${normName(a.techName)}|${bucket}`;
     const ex = byKey.get(key);
     if (!ex) { byKey.set(key, a); out.push(a); continue; }
     ex.services = [...ex.services, ...a.services];
     ex.duration = (ex.duration || 0) + (a.duration || 0);
     if (a.notes && !(ex.notes || '').includes(a.notes)) ex.notes = ex.notes ? `${ex.notes}\n${a.notes}` : a.notes;
-    if (ex.status === 'cancelled' && a.status !== 'cancelled') ex.status = a.status;
   }
   return out;
 }
@@ -248,9 +253,9 @@ export function mergeAppointmentRows(rows) {
 // the block never renders.
 export function normalizeApptTechNames(appts, rosterNames) {
   const byNorm = new Map();
-  (rosterNames || []).forEach(n => { if (n) byNorm.set(String(n).trim().toLowerCase(), n); });
+  (rosterNames || []).forEach(n => { if (n) byNorm.set(normName(n), n); });
   (appts || []).forEach(a => {
-    const hit = byNorm.get(String(a.techName || '').trim().toLowerCase());
+    const hit = byNorm.get(normName(a.techName));
     if (hit) a.techName = hit;
   });
   return appts;
