@@ -63,6 +63,11 @@ export default function CsvImportSection({ onBusyChange }) {
   const reloadStaff = useCallback(() => { fetchEmployees().then(e => setStaffList(e || [])).catch(() => setStaffList([])); }, []);
   useEffect(() => { reloadStaff(); }, [reloadStaff]);
 
+  // Service-menu readiness — appointment durations are derived from it, so warn
+  // (softly) if it's empty. null = not loaded yet.
+  const [servicesCount, setServicesCount] = useState(null);
+  useEffect(() => { fetchServices().then(s => setServicesCount((s || []).length)).catch(() => setServicesCount(null)); }, []);
+
   // Common
   const [running,  setRunning]  = useState(null); // 'clients' | 'receipts' | 'appointments' | null
   const [progress, setProgress] = useState('');
@@ -501,12 +506,14 @@ export default function CsvImportSection({ onBusyChange }) {
     if (apptsFileRef.current)     apptsFileRef.current.value = '';
   }
 
-  // Step gating
-  const step1Done   = !!clientsResult;
-  const step2Ready  = step1Done && !!paymentsFile;
-  const step3Ready  = step2Ready && !!lineItemsFile;
-  const step3Done   = !!receiptsResult;
-  const step4Done   = !!apptsResult;
+  // Step gating — STRICT order, each step locked until its prerequisites are met:
+  //   1 Staff → 2 Contacts → 3 Payment Details → 4 Line Items(→receipts) → 5 Appointments.
+  // Staff/clients are prerequisites for BOTH sales and appointments (attribution +
+  // linking), so those two both gate on clients-done, not on each other.
+  const staffDone    = staffList.length > 0;   // GG has no staff export; done once any staff exist
+  const clientsDone  = !!clientsResult;
+  const receiptsDone = !!receiptsResult;
+  const apptsDone    = !!apptsResult;
   const busyClients  = running === 'clients';
   const busyReceipts = running === 'receipts';
   const busyAppts    = running === 'appointments';
@@ -525,23 +532,23 @@ export default function CsvImportSection({ onBusyChange }) {
 
       <div style={{ padding: '14px 16px' }}>
         <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.55, marginBottom: 14 }}>
-          Four CSV imports — contacts first, then sales, then appointments. Export from <strong>GlossGenius → Insights → Reports</strong>. Records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
+          Do these in order — each step unlocks once the ones it depends on are done: <strong>1 Staff → 2 Contacts → 3 Payment Details → 4 Checkout Line Items → 5 Appointments</strong>. Sales and appointments both need staff + contacts already in, so those come first. Export the CSVs from <strong>GlossGenius → Insights → Reports</strong>; records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
         </div>
 
-        {/* Staff (screenshots) — GG has no staff export. Do this FIRST so imported
-            sales in step 3 attribute to the right person. */}
-        <div style={{ border: '1px solid var(--pn-border)', borderRadius: 10, padding: 14, marginBottom: 14, background: 'var(--pn-bg)' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 4 }}>👥 Staff — from screenshots</div>
-          <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
-            GlossGenius has no staff export, so import your team from screenshots of its staff list.
-            Do this <strong>first</strong> — then sales in step 3 attribute to the right person, and any tech
-            in your transactions who isn't on staff is auto-added as a disabled former staff member.
-          </div>
+        {/* ── Step 1: Staff ── GG has no staff export → import from screenshots.
+            Required first so sales + appointments attribute to the right person. */}
+        <Step
+          num={1}
+          title="Staff"
+          description="GlossGenius has no staff export, so import your team from screenshots of its staff list. Required first — sales and appointments attribute to these people, and any tech in your data who isn't on staff is auto-added as disabled former staff."
+          state={staffDone ? 'done' : 'active'}
+          locked={false}
+        >
           <button onClick={() => setImportStaff(true)} style={primaryBtn(false)}>📷 Import staff from screenshots</button>
-          {staffList.length > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginLeft: 10 }}>{staffList.length} staff on file</span>
+          {staffDone && (
+            <Result>✓ {staffList.length} staff on file</Result>
           )}
-        </div>
+        </Step>
 
         {importStaff && (
           <StaffImportModal
@@ -553,42 +560,48 @@ export default function CsvImportSection({ onBusyChange }) {
         )}
 
         <Step
-          num={1}
+          num={2}
           title="Contacts"
-          description="Import your client list first so receipts in step 3 can link to them."
-          state={step1Done ? 'done' : (busyClients ? 'running' : 'active')}
-          locked={false}
+          description="Import your client list. Receipts and appointments link to these clients by name."
+          state={clientsDone ? 'done' : (busyClients ? 'running' : 'active')}
+          locked={!staffDone}
         >
-          <FilePickerRow
-            ref_={clientsFileRef}
-            onChange={onPickClients}
-            disabled={busyClients || step1Done}
-            file={clientsFile}
-            expectedLabel="GG Clients CSV"
-          />
-          {clientsFile && !step1Done && (
-            <PreviewBlock file={clientsFile} type="clients" rows={clientsFile.mapped} />
-          )}
-          {clientsFile && !step1Done && (
-            <button onClick={runImportClients} disabled={running !== null}
-              style={primaryBtn(running !== null || step1Done)}>
-              {busyClients ? 'Importing…' : `Import ${clientsFile.mapped.length} contacts`}
-            </button>
-          )}
-          {clientsResult && (
-            <Result>✓ {clientsResult.imported.toLocaleString()} new · {clientsResult.updated} updated · {clientsResult.skipped} duplicates skipped</Result>
+          {!staffDone ? (
+            <Locked>Complete step 1 first — import your staff</Locked>
+          ) : (
+            <>
+              <FilePickerRow
+                ref_={clientsFileRef}
+                onChange={onPickClients}
+                disabled={busyClients || clientsDone}
+                file={clientsFile}
+                expectedLabel="GG Clients CSV"
+              />
+              {clientsFile && !clientsDone && (
+                <PreviewBlock file={clientsFile} type="clients" rows={clientsFile.mapped} />
+              )}
+              {clientsFile && !clientsDone && (
+                <button onClick={runImportClients} disabled={running !== null}
+                  style={primaryBtn(running !== null || clientsDone)}>
+                  {busyClients ? 'Importing…' : `Import ${clientsFile.mapped.length} contacts`}
+                </button>
+              )}
+              {clientsResult && (
+                <Result>✓ {clientsResult.imported.toLocaleString()} new · {clientsResult.updated} updated · {clientsResult.skipped} duplicates skipped</Result>
+              )}
+            </>
           )}
         </Step>
 
         <Step
-          num={2}
+          num={3}
           title="Payment Details"
-          description="Upload your Payment Details CSV. It will be staged in-browser — no DB write yet. Step 3 joins it with Checkout Line Items."
+          description="Upload your Payment Details CSV. Staged in-browser — no DB write yet. Step 4 joins it with Checkout Line Items."
           state={paymentsFile ? 'done' : 'active'}
-          locked={!step1Done}
+          locked={!clientsDone}
         >
-          {!step1Done ? (
-            <Locked>Complete step 1 first</Locked>
+          {!clientsDone ? (
+            <Locked>Complete steps 1–2 first</Locked>
           ) : (
             <>
               <FilePickerRow
@@ -599,31 +612,31 @@ export default function CsvImportSection({ onBusyChange }) {
                 expectedLabel="GG Payment Details CSV"
               />
               {paymentsFile && (
-                <Result>✓ Loaded {paymentsFile.records.length.toLocaleString()} payment rows · awaiting Checkout Line Items in step 3</Result>
+                <Result>✓ Loaded {paymentsFile.records.length.toLocaleString()} payment rows · awaiting Checkout Line Items in step 4</Result>
               )}
             </>
           )}
         </Step>
 
         <Step
-          num={3}
+          num={4}
           title="Checkout Line Items + import receipts"
           description="Upload Checkout Line Items. Joined with Payment Details on Charge ID → receipts."
-          state={step3Done ? 'done' : (busyReceipts ? 'running' : 'active')}
-          locked={!step2Ready}
+          state={receiptsDone ? 'done' : (busyReceipts ? 'running' : 'active')}
+          locked={!(clientsDone && paymentsFile)}
         >
-          {!step2Ready ? (
-            <Locked>Complete steps 1 and 2 first</Locked>
+          {!(clientsDone && paymentsFile) ? (
+            <Locked>Complete steps 1–3 first</Locked>
           ) : (
             <>
               <FilePickerRow
                 ref_={lineItemsFileRef}
                 onChange={onPickLineItems}
-                disabled={busyReceipts || step3Done}
+                disabled={busyReceipts || receiptsDone}
                 file={lineItemsFile}
                 expectedLabel="GG Checkout Line Items CSV"
               />
-              {joinedReceipts && !step3Done && (
+              {joinedReceipts && !receiptsDone && (
                 <PreviewBlock
                   file={lineItemsFile}
                   type="sales"
@@ -634,7 +647,7 @@ export default function CsvImportSection({ onBusyChange }) {
                   }}
                 />
               )}
-              {joinedReceipts && !step3Done && (
+              {joinedReceipts && !receiptsDone && (
                 <button onClick={runImportReceipts} disabled={running !== null}
                   style={primaryBtn(running !== null)}>
                   {busyReceipts ? 'Importing…' : `Import ${joinedReceipts.length} receipts`}
@@ -648,27 +661,32 @@ export default function CsvImportSection({ onBusyChange }) {
         </Step>
 
         <Step
-          num={4}
+          num={5}
           title="Appointments"
-          description="Upload the GG Appointments CSV — bookings land on the Schedule calendar, linked to your imported clients and matched to staff columns by name. Only needs step 1."
-          state={step4Done ? 'done' : (busyAppts ? 'running' : 'active')}
-          locked={!step1Done}
+          description="Upload the GG Appointments CSV — bookings land on the Schedule calendar, linked to your imported clients and matched to staff by name."
+          state={apptsDone ? 'done' : (busyAppts ? 'running' : 'active')}
+          locked={!clientsDone}
         >
-          {!step1Done ? (
-            <Locked>Complete step 1 first (appointments link to imported clients)</Locked>
+          {!clientsDone ? (
+            <Locked>Complete steps 1–2 first (staff + clients) — appointments link to both</Locked>
           ) : (
             <>
+              {servicesCount === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--pn-warning)', background: 'var(--pn-warning-bg)', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: 6, marginBottom: 8, lineHeight: 1.5 }}>
+                  ⚠ Your service menu is empty, so imported appointment durations will fall back to a default. Set up <strong>Services</strong> first for accurate lengths — you can still import now and adjust later.
+                </div>
+              )}
               <FilePickerRow
                 ref_={apptsFileRef}
                 onChange={onPickAppointments}
-                disabled={busyAppts || step4Done}
+                disabled={busyAppts || apptsDone}
                 file={apptsFile}
                 expectedLabel="GG Appointments CSV"
               />
-              {apptsFile && !step4Done && (
+              {apptsFile && !apptsDone && (
                 <PreviewBlock file={apptsFile} type="appointments" rows={apptsFile.mapped} />
               )}
-              {apptsFile && !step4Done && (
+              {apptsFile && !apptsDone && (
                 <button onClick={runImportAppointments} disabled={running !== null}
                   style={primaryBtn(running !== null)}>
                   {busyAppts ? 'Importing…' : `Import ${apptsFile.mapped.length} appointments`}
