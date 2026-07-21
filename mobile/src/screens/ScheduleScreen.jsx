@@ -685,6 +685,7 @@ export default function ScheduleScreen({ navigation }) {
         prefill={createPrefill}
         editAppt={editAppt}
         gateBlocked={clockGateBlocked}
+        settings={settings}
         onClose={() => { setCreatePrefill(null); setEditAppt(null); }}
         onCreated={() => { setCreatePrefill(null); setEditAppt(null); reloadTimeOff(); }}
       />
@@ -1309,7 +1310,7 @@ function WeekView({ date, techName, showAll, allTechs, clientsById, workDays, ti
 // in edit mode. The two are mutually exclusive — caller picks which.
 // In edit mode the title/CTA flip to "Edit appointment" / "Save changes"
 // and save goes through updateAppointment instead of createAppointment.
-function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated }) {
+function CreateApptModal({ prefill, editAppt, gateBlocked, settings, onClose, onCreated }) {
   // CRITICAL: every hook below runs on every render regardless of
   // open state. Conditional rendering is INSIDE the JSX, never via
   // an early return between hook calls.
