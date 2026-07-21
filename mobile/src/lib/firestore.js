@@ -1024,6 +1024,12 @@ export async function createEmployee(data) {
   bustRefCache('employees');
   return ref.id;
 }
+// Screenshot → staff import: server-side Claude vision extracts staff from
+// screenshots of the old system's roster. Caller reviews then createEmployee()s.
+export async function importStaffFromScreenshots(images) {
+  const res = await callFn('importStaffFromScreenshots')({ tenantId: getCurrentTenant(), images });
+  return res?.data || { staff: [] };
+}
 export async function deleteEmployee(id) {
   await softDelete(doc(tenantCol('employees'), id));
   bustRefCache('employees');
