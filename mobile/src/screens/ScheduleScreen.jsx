@@ -1519,9 +1519,10 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, settings, onClose, on
       }
       // The appointment must fit inside the day's bookable window (store hours
       // widened by appointment hours) — parity with web ScheduleAdmin's hard
-      // block. Skip only while settings are still loading.
+      // block. Skip only while settings are still loading. In edit mode
+      // prefill is null (mutually exclusive props) — use the appt's own date.
       if (settings) {
-        const dow = new Date(prefill.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        const dow = new Date((isEdit ? editAppt.date : prefill.date) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
         const win = bookableWindow(settings, dow);
         const endMin = hhmmToMin(startStr) + totalDuration;
         if (endMin > win.close) {
