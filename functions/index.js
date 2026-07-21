@@ -17,6 +17,7 @@ const { roleCan, normalizeRole, resolveRoleCaps, sanitizeCaps, roleExists, CAPS,
 const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notificationRouting');
 const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
 const phoneAuth = require('./lib/phoneAuth');
+const { parseStaffResponse } = require('./lib/staffImport');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -7934,6 +7935,53 @@ exports.estimateNailArtDuration = onCall(
       reasoning:  String(parsed.reasoning || '').slice(0, 300),
       suggestedPrice,
     };
+  }
+);
+
+// Screenshot → staff import (GlossGenius has no staff export). Admin uploads
+// screenshots of their old system's staff/team list; Claude vision extracts the
+// people as structured JSON. This CF only EXTRACTS — it never creates records;
+// the client shows an editable review table and creates staff on confirm, so a
+// misread can always be corrected first. Admin-only + AI-rate-limited.
+exports.importStaffFromScreenshots = onCall(
+  { secrets: [anthropicKey], cors: true, timeoutSeconds: 90 },
+  async (request) => {
+    const apiKey = anthropicKey.value();
+    if (!apiKey) throw new HttpsError('unavailable', 'AI not configured');
+    const { tenantId: tid, images } = request.data || {};
+    const tenantId = String(tid || TENANT_ID).slice(0, 64);
+    if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) throw new HttpsError('invalid-argument', 'Invalid tenantId');
+    if (!Array.isArray(images) || images.length === 0) throw new HttpsError('invalid-argument', 'At least one screenshot is required');
+    if (images.length > 8) throw new HttpsError('invalid-argument', 'Up to 8 screenshots at a time');
+    const OK_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+    const imgContent = images.map((im) => {
+      const data = String(im?.imageData || '');
+      const mediaType = String(im?.mediaType || 'image/jpeg');
+      if (data.length < 100) throw new HttpsError('invalid-argument', 'A screenshot is empty or unreadable');
+      if (data.length > 7000000) throw new HttpsError('invalid-argument', 'A screenshot is too large — resize before sending');
+      if (!OK_TYPES.includes(mediaType)) throw new HttpsError('invalid-argument', 'Unsupported image type');
+      return { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
+    });
+
+    const db = getFirestore();
+    await requireTenantAdmin(db, tenantId, request);
+    await growAiGuard(db, tenantId);
+
+    const system = 'You help migrate a salon to a new booking system by reading screenshots of their old system\'s staff / team / employee list. Extract EVERY person shown across all the screenshots. Respond with ONLY minified JSON, no prose and no code fence: {"staff":[{"name":"","role":"","email":"","phone":"","instagram":""}]}. Rules: include a person only if a name is visible; use an empty string for any field not shown; do NOT invent emails, phones, or handles; role is their job title if shown (e.g. Nail Technician, Stylist, Owner, Front Desk); if the same person appears in more than one screenshot, include them once.';
+    const client = getAnthropic({ apiKey });
+    const resp = await client.messages.create({
+      model: 'claude-sonnet-4-6', max_tokens: 2000,
+      system,
+      messages: [{ role: 'user', content: [
+        ...imgContent,
+        { type: 'text', text: 'Extract every staff member from these screenshots as JSON.' },
+      ] }],
+    });
+    usageLog.logAiUsage(db, tenantId, { endpoint: 'importStaffFromScreenshots', model: resp?.model || 'claude-sonnet-4-6', usage: resp?.usage }).catch(() => {});
+
+    const staff = parseStaffResponse(resp.content[0]?.text || '');
+    if (!staff.length) throw new HttpsError('internal', "Couldn't read any staff from those screenshots — try clearer or closer shots.");
+    return { staff };
   }
 );
 

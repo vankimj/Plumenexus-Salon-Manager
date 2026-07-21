@@ -787,6 +787,15 @@ export async function createEmployee(data) {
 export const deleteEmployee = (id, deletedBy) => softDelete(doc(EMPLOYEES_COL, id), deletedBy);
 export const purgeEmployee  = (id) => deleteDoc(doc(EMPLOYEES_COL, id));
 
+// Screenshot → staff import: send base64 screenshots of the old system's staff
+// list to Claude vision (server-side) and get back an extracted staff array.
+// The caller reviews/edits, then createEmployee()s the confirmed rows.
+export async function importStaffFromScreenshots(images) {
+  const { httpsCallable } = await import('firebase/functions');
+  const res = await httpsCallable(functions, 'importStaffFromScreenshots')({ tenantId: TENANT_ID, images });
+  return res.data; // { staff: [{name, role, email, phone, instagram}] }
+}
+
 export async function employeesExist() {
   const snap = await getDocs(query(EMPLOYEES_COL, limit(1)));
   return !snap.empty;
