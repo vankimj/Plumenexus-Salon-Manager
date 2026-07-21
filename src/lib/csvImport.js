@@ -121,9 +121,12 @@ function normalizeMoney(raw) {
 
 function normalizeStatus(raw) {
   const s = (raw || '').toLowerCase().trim();
-  if (s.includes('complete') || s.includes('done') || s.includes('paid'))    return 'done';
-  if (s.includes('cancel'))                                                  return 'cancelled';
-  if (s.includes('no show') || s.includes('no-show'))                        return 'no_show';
+  if (s.includes('cancel'))                                                          return 'cancelled';
+  // GG exports the underscore form 'no_show' (plus 'no show' / 'no-show' elsewhere).
+  if (s.includes('no_show') || s.includes('no show') || s.includes('no-show'))       return 'no_show';
+  // 'checkout' = the appointment reached checkout in GG → treat as done.
+  if (s === 'checkout' || s.includes('complete') || s.includes('done') ||
+      s.includes('paid') || s.includes('checked out'))                               return 'done';
   return 'scheduled';
 }
 
@@ -152,10 +155,14 @@ export function detectType(headers) {
   }
   // Sales / receipts (generic single-file)
   if (has('total', 'tip', 'payment method', 'transaction date')) return 'sales';
-  // Appointments: presence of date + service + provider/staff
-  if (has('appointment date', 'service date', 'service') &&
-      has('provider', 'staff', 'stylist', 'service provider')) return 'appointments';
-  if ((has('date') || has('appointment date')) && has('service')) return 'appointments';
+  // GG Appointments export (one row per appointment): a "Date of Appointment"
+  // timestamp + a "Services" cell + "Service Provided By" (or an Appointment ID).
+  if (has('appointment id') && has('services', 'service')) return 'appointments';
+  if (has('date of appointment', 'appointment date', 'service date') &&
+      has('services', 'service') &&
+      has('service provided by', 'provider', 'staff', 'stylist', 'service provider')) return 'appointments';
+  if ((has('date') || has('appointment date') || has('date of appointment')) &&
+      has('service', 'services')) return 'appointments';
   // Clients: presence of email/phone but no date/service
   if ((has('email') || has('phone') || has('mobile')) && !has('date', 'service')) return 'clients';
   return 'unknown';
@@ -366,6 +373,50 @@ function mapJoinedReceipt(payment, lines, clientLookup) {
   };
 }
 
+// ── Appointment service parsing ────────────────────────
+// GG's Appointments export puts ALL of an appointment's services in one
+// "Services" cell, joined by ", " — and each service often carries a
+// "(menu item)" suffix, e.g. "Nail Art, Gel x (Gel X With Removal)". Split on
+// TOP-LEVEL commas only (a comma inside parentheses belongs to a service name).
+export function splitServices(raw) {
+  if (!raw) return [];
+  const parts = [];
+  let depth = 0, cur = '';
+  for (const ch of String(raw)) {
+    if (ch === '(') { depth++; cur += ch; }
+    else if (ch === ')') { depth = Math.max(0, depth - 1); cur += ch; }
+    else if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts.filter(Boolean);
+}
+
+// Build normName(serviceName) → duration(min) from the salon's service menu.
+export function buildServiceDurationLookup(services) {
+  const map = {};
+  (services || []).forEach(s => {
+    if (s && s.name && s.duration) map[normName(s.name)] = s.duration;
+  });
+  return map;
+}
+
+// The GG Appointments export carries NO duration column, so derive it from the
+// salon's menu by matching the service name. Try the whole label, then the text
+// inside the "(...)" (GG's actual menu-item name), then the text before it.
+// Fall back to a modest default so an unmatched service still occupies a slot.
+const DEFAULT_SVC_MIN = 30;
+export function matchServiceDuration(name, lookup) {
+  if (!lookup || !name) return DEFAULT_SVC_MIN;
+  const candidates = [normName(name)];
+  const paren = String(name).match(/\(([^)]+)\)/);
+  if (paren) candidates.push(normName(paren[1]));
+  const before = String(name).replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+  if (before) candidates.push(normName(before));
+  for (const k of candidates) { if (lookup[k]) return lookup[k]; }
+  return DEFAULT_SVC_MIN;
+}
+
 // ── Mappers ────────────────────────────────────────────
 // Each returns the Firestore document shape for a single row.
 // `null` = skip this row (missing critical field).
@@ -398,32 +449,48 @@ export function mapClientRow(record) {
   };
 }
 
-export function mapAppointmentRow(record, clientLookup) {
-  const date = normalizeDate(getCol(record, ['Appointment Date', 'Service Date', 'Date']));
-  const startTime = normalizeTime(getCol(record, ['Start Time', 'Time', 'Appointment Time']));
+export function mapAppointmentRow(record, clientLookup, serviceDurations) {
+  // Date + start time BOTH come from GG's combined "Date of Appointment"
+  // timestamp ("11-15-24, 7:34 PM"); fall back to older/assumed layouts.
+  const dtRaw = getCol(record, ['Date of Appointment', 'Appointment Date', 'Service Date', 'Date']);
+  const { date, time } = parseGgDateTime(dtRaw);
+  const startTime = time
+    || normalizeTime(getCol(record, ['Start Time', 'Time', 'Appointment Time']))
+    || '12:00';
+
   const clientName = pickFullName(record);
-  const techName = getCol(record, ['Provider', 'Staff', 'Stylist', 'Service Provider', 'Tech', 'Technician']);
-  const serviceName = getCol(record, ['Service', 'Service Name', 'Services']);
-  const price = normalizeMoney(getCol(record, ['Price', 'Service Price', 'Amount', 'Service Total']));
-  const duration = parseInt(getCol(record, ['Duration', 'Duration (mins)', 'Length']), 10) || 60;
+  // GG's provider column is "Service Provided By"; keep the older aliases too.
+  const techName = getCol(record, ['Service Provided By', 'Provider', 'Staff', 'Stylist', 'Service Provider', 'Tech', 'Technician']);
+
+  // One row can list several services (~half of GG exports). Split them out and
+  // derive each duration from the salon menu — the export has no duration column.
+  const services = splitServices(getCol(record, ['Services', 'Service', 'Service Name']))
+    .map(name => ({ id: null, name, price: 0, duration: matchServiceDuration(name, serviceDurations) }));
+
   const status = normalizeStatus(getCol(record, ['Status', 'Appointment Status']));
-  const notes = getCol(record, ['Notes', 'Appointment Notes', 'Client Notes']);
-  if (!date || !clientName || !serviceName) return null;
+  const apptId = getCol(record, ['Appointment ID', 'Appointment Id']);
+  const notes  = getCol(record, ['Notes', 'Appointment Notes', 'Client Notes']);
+
+  if (!date || !clientName || services.length === 0) return null;
+
+  const duration = services.reduce((s, sv) => s + (sv.duration || 0), 0) || 60;
   const clientId = clientLookup ? (clientLookup[clientKey(clientName)] || null) : null;
+
   return {
     date,
-    startTime: startTime || '12:00',
+    startTime,
     duration,
     techName: techName || 'TBD',
     techId: null,
     clientId,
     clientName,
-    services: [{ id: null, name: serviceName, price, duration }],
+    services,
     status,
     notes: notes || '',
     techRequestType: 'scheduler',
     source: 'imported',
     _importedFrom: 'glossgenius',
+    _glossgeniusAppointmentId: apptId || null,
     _importedAt: new Date().toISOString(),
   };
 }
