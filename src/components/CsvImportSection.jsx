@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createAppointmentsBatch, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey, fetchEmployees, createEmployee } from '../lib/firestore';
+import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createAppointmentsBatch, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey, fetchEmployees, createEmployee, fetchServices } from '../lib/firestore';
 import { logActivity } from '../lib/logger';
 import {
   parseCsv, detectType,
@@ -8,6 +8,7 @@ import {
   mergeAppointmentRows, normalizeApptTechNames,
   buildReceiptsFromGg, clientKey,
   collectTechNames, missingTechNames,
+  buildServiceDurationLookup,
 } from '../lib/csvImport';
 import StaffImportModal from '../modules/employees/StaffImportModal';
 
@@ -366,7 +367,11 @@ export default function CsvImportSection({ onBusyChange }) {
         setProgress('');
         return;
       }
-      const mapped = mergeAppointmentRows(result.records.map(r => mapAppointmentRow(r, null)).filter(Boolean));
+      // Derive per-appointment durations from the salon menu — the GG export
+      // has no duration column. Best-effort: an empty lookup just falls back to
+      // the default per-service minutes.
+      const durations = buildServiceDurationLookup(await fetchServices().catch(() => []));
+      const mapped = mergeAppointmentRows(result.records.map(r => mapAppointmentRow(r, null, durations)).filter(Boolean));
       setApptsFile({ ...result, mapped });
       setProgress('');
     } catch (e) {

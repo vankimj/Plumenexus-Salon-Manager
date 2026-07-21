@@ -4,6 +4,7 @@ import {
   mapClientRow, mapAppointmentRow, mapSaleRow,
   mergeAppointmentRows, normalizeApptTechNames,
   buildReceiptsFromGg,
+  splitServices, matchServiceDuration, buildServiceDurationLookup,
 } from './csvImport';
 
 // ── parseCsv ───────────────────────────────────────────
@@ -127,23 +128,75 @@ describe('mapClientRow', () => {
 describe('mapAppointmentRow', () => {
   const lookup = { 'jane doe': 'client123' };
 
-  it('maps a complete appointment row', () => {
+  it('maps a real GlossGenius appointment row (combined timestamp, multi-service, menu duration)', () => {
+    const durations = buildServiceDurationLookup([
+      { name: 'Nail Art', duration: 15 },
+      { name: 'Gel X With Removal', duration: 75 },
+    ]);
+    const r = mapAppointmentRow({
+      'Date of Appointment': '11-15-24,  7:34 PM',   // note GG's double space
+      'Services': 'Nail Art, Gel x (Gel X With Removal)',
+      'Client Name': 'Jane Doe',
+      'Service Provided By': 'Yasmin',
+      'Status': 'completed',
+      'Appointment ID': 'appt_abc',
+    }, { 'jane doe': 'client123' }, durations);
+    expect(r.date).toBe('2024-11-15');
+    expect(r.startTime).toBe('19:34');
+    expect(r.techName).toBe('Yasmin');
+    expect(r.services.map(s => s.name)).toEqual(['Nail Art', 'Gel x (Gel X With Removal)']);
+    expect(r.duration).toBe(90);   // 15 (Nail Art) + 75 (matched via the "(Gel X With Removal)" menu item)
+    expect(r.status).toBe('done');
+    expect(r.clientId).toBe('client123');
+    expect(r._glossgeniusAppointmentId).toBe('appt_abc');
+  });
+
+  it('maps the older assumed layout too (Appointment Date + Provider + Service)', () => {
     const r = mapAppointmentRow({
       'First Name': 'Jane', 'Last Name': 'Doe',
-      'Appointment Date': '2026-05-02',
-      'Start Time': '10:30 AM',
-      'Provider': 'Yasmin',
-      'Service':  'Manicure',
-      'Price':    '$45',
-      'Duration': '60',
-      'Status':   'Completed',
+      'Appointment Date': '2026-05-02', 'Start Time': '10:30 AM',
+      'Provider': 'Yasmin', 'Service': 'Manicure', 'Status': 'Completed',
     }, lookup);
     expect(r.date).toBe('2026-05-02');
     expect(r.startTime).toBe('10:30');
     expect(r.techName).toBe('Yasmin');
-    expect(r.services[0]).toMatchObject({ name: 'Manicure', price: 45, duration: 60 });
+    expect(r.services.map(s => s.name)).toEqual(['Manicure']);
     expect(r.status).toBe('done');
-    expect(r.clientId).toBe('client123');
+  });
+
+  it('maps GG statuses: no_show and checkout', () => {
+    const row = (status) => mapAppointmentRow({
+      'Date of Appointment': '11-15-24, 7:34 PM', 'Services': 'Manicure',
+      'Client Name': 'Jane Doe', 'Service Provided By': 'Y', 'Status': status,
+    }, null);
+    expect(row('no_show').status).toBe('no_show');
+    expect(row('checkout').status).toBe('done');
+    expect(row('cancelled').status).toBe('cancelled');
+  });
+
+  it('splitServices splits on top-level commas, keeping commas inside parentheses', () => {
+    expect(splitServices('Nail Art, Gel x (Gel X With Removal)'))
+      .toEqual(['Nail Art', 'Gel x (Gel X With Removal)']);
+    expect(splitServices('Removal (Gel Removal ), Structured Gel Manicure'))
+      .toEqual(['Removal (Gel Removal )', 'Structured Gel Manicure']);
+    expect(splitServices('Foo (a, b), Bar')).toEqual(['Foo (a, b)', 'Bar']);
+    expect(splitServices('')).toEqual([]);
+  });
+
+  it('matchServiceDuration matches full label, then the parenthetical, then the prefix', () => {
+    const lk = buildServiceDurationLookup([{ name: 'Gel X With Removal', duration: 75 }]);
+    expect(matchServiceDuration('Gel x (Gel X With Removal)', lk)).toBe(75);
+    expect(matchServiceDuration('Totally Unknown Service', lk)).toBe(30); // default fallback
+    expect(matchServiceDuration('anything', null)).toBe(30);              // no menu → default
+  });
+
+  it('detectType recognizes the real GG Appointments export header', () => {
+    expect(detectType([
+      'Date of Appointment', 'Date Booked', 'Services', 'Client Name',
+      'Service Provided By', 'Booked By', 'Booking Method', 'Status',
+      'Deposit Amount', 'Deposit Collected', 'Charge ID', 'Appointment ID',
+      'Card on File Expiration Date',
+    ])).toBe('appointments');
   });
   it('returns null when date is missing', () => {
     expect(mapAppointmentRow({ 'Client Name': 'X', Service: 'Y' })).toBeNull();
