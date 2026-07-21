@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseCsv, detectType, parseGgDateTime, clientKey,
   mapClientRow, mapAppointmentRow, mapSaleRow,
+  mergeAppointmentRows, normalizeApptTechNames,
   buildReceiptsFromGg,
 } from './csvImport';
 
@@ -155,6 +156,88 @@ describe('mapAppointmentRow', () => {
       'Client Name': 'Stranger', Date: '2026-05-02', Service: 'Manicure',
     }, lookup);
     expect(r.clientId).toBeNull();
+  });
+});
+
+// ── mergeAppointmentRows ───────────────────────────────
+describe('mergeAppointmentRows', () => {
+  const row = (over = {}) => ({
+    date: '2026-08-01', startTime: '10:00', clientName: 'Jane Doe', techName: 'Yasmin',
+    services: [{ id: null, name: 'Manicure', price: 45, duration: 60 }],
+    duration: 60, status: 'scheduled', notes: '',
+    ...over,
+  });
+
+  it('merges rows sharing date+time+client+tech into one appointment', () => {
+    const merged = mergeAppointmentRows([
+      row(),
+      row({ services: [{ id: null, name: 'Pedicure', price: 55, duration: 45 }], duration: 45 }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].services.map(s => s.name)).toEqual(['Manicure', 'Pedicure']);
+    expect(merged[0].duration).toBe(105);
+  });
+
+  it('keeps distinct slots separate', () => {
+    const merged = mergeAppointmentRows([
+      row(),
+      row({ startTime: '14:00' }),
+      row({ clientName: 'Ana P' }),
+      row({ techName: 'Tess' }),
+    ]);
+    expect(merged).toHaveLength(4);
+  });
+
+  it('matches client/tech names case- and whitespace-insensitively', () => {
+    const merged = mergeAppointmentRows([
+      row(),
+      row({ clientName: '  jane  DOE ', techName: 'YASMIN' }),
+    ]);
+    expect(merged).toHaveLength(1);
+  });
+
+  it('a non-cancelled row wins over a cancelled one for status', () => {
+    const merged = mergeAppointmentRows([
+      row({ status: 'cancelled' }),
+      row({ status: 'scheduled' }),
+    ]);
+    expect(merged[0].status).toBe('scheduled');
+  });
+
+  it('concatenates distinct notes, skips duplicate notes', () => {
+    const merged = mergeAppointmentRows([
+      row({ notes: 'gel' }),
+      row({ notes: 'gel' }),
+      row({ notes: 'french tips' }),
+    ]);
+    expect(merged[0].notes).toBe('gel\nfrench tips');
+  });
+
+  it('handles empty/missing input', () => {
+    expect(mergeAppointmentRows([])).toEqual([]);
+    expect(mergeAppointmentRows(null)).toEqual([]);
+  });
+});
+
+// ── normalizeApptTechNames ─────────────────────────────
+describe('normalizeApptTechNames', () => {
+  it('rewrites techName to the roster\'s exact casing', () => {
+    const appts = [{ techName: 'yasmin d' }, { techName: 'TESS D' }];
+    normalizeApptTechNames(appts, ['Yasmin D', 'Tess D']);
+    expect(appts.map(a => a.techName)).toEqual(['Yasmin D', 'Tess D']);
+  });
+
+  it('leaves unmatched names untouched', () => {
+    const appts = [{ techName: 'Departed Tech' }, { techName: 'TBD' }];
+    normalizeApptTechNames(appts, ['Yasmin D']);
+    expect(appts.map(a => a.techName)).toEqual(['Departed Tech', 'TBD']);
+  });
+
+  it('tolerates empty roster and empty appts', () => {
+    expect(normalizeApptTechNames([], ['Yasmin D'])).toEqual([]);
+    const appts = [{ techName: 'Yasmin D' }];
+    normalizeApptTechNames(appts, []);
+    expect(appts[0].techName).toBe('Yasmin D');
   });
 });
 

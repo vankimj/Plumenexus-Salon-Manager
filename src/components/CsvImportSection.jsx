@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey, fetchEmployees, createEmployee } from '../lib/firestore';
+import { createClient, saveClient, createClientsBatch, saveClientsBatch, createAppointment, createAppointmentsBatch, createReceipt, createReceiptsBatch, fetchClients, fetchExistingGgTransactionIds, fetchExistingApptKeys, apptDedupKey, fetchEmployees, createEmployee } from '../lib/firestore';
 import { logActivity } from '../lib/logger';
 import {
   parseCsv, detectType,
   mapClientRow, mapAppointmentRow,
+  mergeAppointmentRows, normalizeApptTechNames,
   buildReceiptsFromGg, clientKey,
   collectTechNames, missingTechNames,
 } from '../lib/csvImport';
@@ -20,16 +21,18 @@ const TYPE_LABELS = {
 
 const MAX_INLINE_SKIPPED = 50;
 
-// Three-step GG import wizard:
+// Four-step GG import wizard:
 //   Step 1 — Contacts (Clients CSV): imports first so receipts can link to
 //            newly-created clients in step 3.
 //   Step 2 — Payment Details: file is parsed and staged in-memory only —
 //            no DB write here. Stays staged until step 3 joins it.
 //   Step 3 — Checkout Line Items: joins with staged payments on Charge ID
 //            and writes the resulting receipts in one pass.
-// Each step is gated on the previous. Closing the tab mid-flow loses the
-// in-memory staged Payment Details; user restarts from step 1. Step 1 is
-// idempotent (dedup by name) so re-running it is safe.
+//   Step 4 — Appointments: bookings land on the Schedule calendar. Only
+//            needs step 1 (client linking), not steps 2–3.
+// Steps 2–3 are gated on the previous. Closing the tab mid-flow loses the
+// in-memory staged Payment Details; user restarts from step 1. Steps 1 and 4
+// are idempotent (dedup by name / by slot key) so re-running is safe.
 export default function CsvImportSection({ onBusyChange }) {
   const { showToast } = useApp();
 
@@ -47,6 +50,11 @@ export default function CsvImportSection({ onBusyChange }) {
   const [lineItemsFile,   setLineItemsFile]   = useState(null);
   const [receiptsResult,  setReceiptsResult]  = useState(null);
 
+  // Step 4: Appointments
+  const apptsFileRef = useRef(null);
+  const [apptsFile,   setApptsFile]   = useState(null);
+  const [apptsResult, setApptsResult] = useState(null);
+
   // Staff import (from screenshots) — GG has no staff export, so this lives at
   // the top of the migration hub. Loads existing staff names for dedup.
   const [importStaff, setImportStaff] = useState(false);
@@ -55,7 +63,7 @@ export default function CsvImportSection({ onBusyChange }) {
   useEffect(() => { reloadStaff(); }, [reloadStaff]);
 
   // Common
-  const [running,  setRunning]  = useState(null); // 'clients' | 'receipts' | null
+  const [running,  setRunning]  = useState(null); // 'clients' | 'receipts' | 'appointments' | null
   const [progress, setProgress] = useState('');
   const [progressNum, setProgressNum] = useState(null); // { current, total, label } for the progress bar
   const [skipped,  setSkipped]  = useState(null);
@@ -343,15 +351,134 @@ export default function CsvImportSection({ onBusyChange }) {
     }
   }
 
+  // ── Step 4: Appointments ─────────────────────────────────────
+  async function onPickAppointments(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setProgress('Reading Appointments file…');
+    try {
+      const result = await readAndParse(f);
+      if (result.type !== 'appointments') {
+        showToast(`This file looks like ${TYPE_LABELS[result.type]}, not Appointments. Re-upload the GG Appointments CSV.`, 5000);
+        if (apptsFileRef.current) apptsFileRef.current.value = '';
+        setProgress('');
+        return;
+      }
+      const mapped = mergeAppointmentRows(result.records.map(r => mapAppointmentRow(r, null)).filter(Boolean));
+      setApptsFile({ ...result, mapped });
+      setProgress('');
+    } catch (e) {
+      showToast('Could not parse CSV: ' + e.message, 4000);
+      setProgress('');
+    }
+  }
+
+  async function runImportAppointments() {
+    if (!apptsFile) return;
+    if (!window.confirm(`Import ${apptsFile.mapped.length} appointments from ${apptsFile.fileName}?\n\nThey appear on the Schedule calendar. Duplicates (same date, time, client, tech + service already in the DB) will be skipped. Tagged as imported from GlossGenius.`)) return;
+
+    setRunning('appointments');
+    setSkipped(null);
+    cancelRef.current = false;
+    let count = 0;
+    let cancelled = false;
+    const skippedRows = [];
+    try {
+      setProgress('Loading client lookup + dedup index…');
+      const [fresh, existingKeys, existingEmps] = await Promise.all([
+        fetchClients().catch(() => []),
+        fetchExistingApptKeys().catch(() => new Set()),
+        fetchEmployees().catch(() => []),
+      ]);
+      const lookup = {};
+      fresh.forEach(c => { if (c.name) lookup[clientKey(c.name)] = c.id; });
+      const appts = normalizeApptTechNames(
+        apptsFile.mapped.map(a => ({ ...a, clientId: lookup[clientKey(a.clientName)] || null })),
+        existingEmps.map(e => e.name),
+      );
+      setProgressNum({ current: 0, total: appts.length, label: 'appointments' });
+
+      const toImport = [];
+      for (const a of appts) {
+        const key = apptDedupKey(a);
+        if (existingKeys.has(key)) {
+          skippedRows.push({
+            date: a.date, time: a.startTime, client: a.clientName, tech: a.techName,
+            service: (a.services || []).map(s => s.name).join(' + '), status: a.status,
+            reason: 'Same date/time/client/tech already in DB',
+          });
+        } else {
+          toImport.push(a);
+          existingKeys.add(key);
+        }
+      }
+
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < toImport.length; i += CHUNK_SIZE) {
+        if (cancelRef.current) { cancelled = true; break; }
+        const chunk = toImport.slice(i, i + CHUNK_SIZE);
+        await createAppointmentsBatch(chunk);
+        count += chunk.length;
+        const done = count + skippedRows.length;
+        setProgress(`Appointments: ${count.toLocaleString()} imported, ${skippedRows.length.toLocaleString()} skipped (already in DB) / ${appts.length.toLocaleString()}`);
+        setProgressNum({ current: done, total: appts.length, label: 'appointments' });
+      }
+      logActivity('gg_import', `appointments: ${count} new, ${skippedRows.length} skipped${cancelled ? ' [CANCELLED]' : ''} from ${apptsFile.fileName}`);
+
+      // Techs referenced by imported bookings who aren't on staff — same
+      // disabled former-staff auto-create as receipts. Best-effort: never
+      // let this fail the appointment import.
+      let unmatched = [];
+      try {
+        unmatched = missingTechNames(collectTechNames(appts), existingEmps.map(e => e.name));
+        for (let i = 0; i < unmatched.length; i++) {
+          await createEmployee({
+            name: unmatched[i],
+            active: false,
+            notes: 'Likely a former staff member — auto-created from an imported appointment so history stays attributed.',
+            _autoCreatedFromImport: true,
+            sortOrder: existingEmps.length + i,
+          });
+        }
+        if (unmatched.length) {
+          logActivity('gg_import_former_staff', `${unmatched.length} disabled staff auto-created from appointments: ${unmatched.join(', ')}`);
+        }
+      } catch (e) { console.warn('[CSV] auto-create former staff failed:', e?.message); }
+
+      setProgress('');
+      const linked = appts.filter(a => a.clientId).length;
+      const today = new Date().toISOString().slice(0, 10);
+      const upcoming = toImport.filter(a => a.date >= today).length;
+      if (cancelled) {
+        setProgress(`Cancelled at ${count + skippedRows.length}/${appts.length}. Already-imported appointments stay; you can re-run safely (dedup will skip them).`);
+        showToast(`Cancelled · ${count} appointments imported before stop`, 3500);
+      } else {
+        setApptsResult({ imported: count, skipped: skippedRows.length, linked, total: appts.length, upcoming, unmatched });
+        showToast(`✓ Step 4: ${count} appointments imported · ${skippedRows.length} duplicates skipped`, 3500);
+      }
+      if (skippedRows.length > 0) setSkipped({ type: 'appointments', rows: skippedRows, fileName: apptsFile.fileName });
+    } catch (e) {
+      console.error('[CSV] appointments import failed:', e);
+      showToast('Import failed: ' + e.message, 4000);
+      setProgress(`Error after ${count + skippedRows.length} records: ${e.message}`);
+    } finally {
+      setRunning(null);
+      setProgressNum(null);
+      cancelRef.current = false;
+    }
+  }
+
   function resetAll() {
     if (!window.confirm('Reset the wizard? Any unsaved staged files will be cleared. Clients already imported stay in the DB.')) return;
     setClientsFile(null);   setClientsResult(null);
     setPaymentsFile(null);
     setLineItemsFile(null); setReceiptsResult(null);
+    setApptsFile(null);     setApptsResult(null);
     setProgress(''); setSkipped(null);
     if (clientsFileRef.current)   clientsFileRef.current.value = '';
     if (paymentsFileRef.current)  paymentsFileRef.current.value = '';
     if (lineItemsFileRef.current) lineItemsFileRef.current.value = '';
+    if (apptsFileRef.current)     apptsFileRef.current.value = '';
   }
 
   // Step gating
@@ -359,14 +486,16 @@ export default function CsvImportSection({ onBusyChange }) {
   const step2Ready  = step1Done && !!paymentsFile;
   const step3Ready  = step2Ready && !!lineItemsFile;
   const step3Done   = !!receiptsResult;
+  const step4Done   = !!apptsResult;
   const busyClients  = running === 'clients';
   const busyReceipts = running === 'receipts';
+  const busyAppts    = running === 'appointments';
 
   return (
     <div style={{ background: 'var(--pn-surface)', border: '1px solid var(--pn-border)', borderRadius: 12, marginBottom: 12, overflow: 'hidden' }}>
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--pn-border)', background: 'var(--pn-bg)', fontSize: 13, fontWeight: 700, color: 'var(--pn-text)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>📥 Import from GlossGenius</span>
-        {(clientsFile || paymentsFile || lineItemsFile) && (
+        {(clientsFile || paymentsFile || lineItemsFile || apptsFile) && (
           <button onClick={resetAll}
             style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--pn-border-strong)', background: 'var(--pn-surface)', color: 'var(--pn-text-muted)', cursor: 'pointer', fontFamily: 'inherit' }}>
             Reset wizard
@@ -376,7 +505,7 @@ export default function CsvImportSection({ onBusyChange }) {
 
       <div style={{ padding: '14px 16px' }}>
         <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.55, marginBottom: 14 }}>
-          Three sequential CSV imports — each unlocks the next. Export from <strong>GlossGenius → Insights → Reports</strong>. Records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
+          Four CSV imports — contacts first, then sales, then appointments. Export from <strong>GlossGenius → Insights → Reports</strong>. Records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
         </div>
 
         {/* Staff (screenshots) — GG has no staff export. Do this FIRST so imported
@@ -498,6 +627,47 @@ export default function CsvImportSection({ onBusyChange }) {
           )}
         </Step>
 
+        <Step
+          num={4}
+          title="Appointments"
+          description="Upload the GG Appointments CSV — bookings land on the Schedule calendar, linked to your imported clients and matched to staff columns by name. Only needs step 1."
+          state={step4Done ? 'done' : (busyAppts ? 'running' : 'active')}
+          locked={!step1Done}
+        >
+          {!step1Done ? (
+            <Locked>Complete step 1 first (appointments link to imported clients)</Locked>
+          ) : (
+            <>
+              <FilePickerRow
+                ref_={apptsFileRef}
+                onChange={onPickAppointments}
+                disabled={busyAppts || step4Done}
+                file={apptsFile}
+                expectedLabel="GG Appointments CSV"
+              />
+              {apptsFile && !step4Done && (
+                <PreviewBlock file={apptsFile} type="appointments" rows={apptsFile.mapped} />
+              )}
+              {apptsFile && !step4Done && (
+                <button onClick={runImportAppointments} disabled={busyAppts}
+                  style={primaryBtn(busyAppts)}>
+                  {busyAppts ? 'Importing…' : `Import ${apptsFile.mapped.length} appointments`}
+                </button>
+              )}
+              {apptsResult && (
+                <>
+                  <Result>✓ {apptsResult.imported.toLocaleString()} imported · {apptsResult.upcoming.toLocaleString()} upcoming · {apptsResult.linked}/{apptsResult.total} linked to clients · {apptsResult.skipped} duplicates skipped</Result>
+                  {apptsResult.unmatched.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--pn-warning)', background: 'var(--pn-warning-bg)', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: 6, marginTop: 6, lineHeight: 1.5 }}>
+                      ⚠ {apptsResult.unmatched.length} staff name{apptsResult.unmatched.length !== 1 ? 's' : ''} from the CSV {apptsResult.unmatched.length !== 1 ? "aren't" : "isn't"} on your roster (added as disabled): <strong>{apptsResult.unmatched.join(', ')}</strong>. Their appointments won't show on the calendar until that staff member is enabled in Staff.
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </Step>
+
         {progressNum && (
           <ProgressBar
             current={progressNum.current}
@@ -515,7 +685,7 @@ export default function CsvImportSection({ onBusyChange }) {
         {skipped && <SkippedPanel skipped={skipped} onClose={() => setSkipped(null)} />}
 
         <div style={{ marginTop: 12, padding: 10, background: 'var(--pn-warning-bg)', border: '1px solid #fde68a', borderRadius: 8, fontSize: 11, color: 'var(--pn-warning)', lineHeight: 1.5 }}>
-          <strong>How to export from GlossGenius:</strong> Open <strong>Insights → Reports</strong>, download <strong>Clients</strong>, <strong>Payment Details</strong>, and <strong>Checkout Line Items</strong> (choose your date range for the last two).
+          <strong>How to export from GlossGenius:</strong> Open <strong>Insights → Reports</strong>, download <strong>Clients</strong>, <strong>Payment Details</strong>, <strong>Checkout Line Items</strong>, and <strong>Appointments</strong> (choose your date range — for appointments, include future dates so upcoming bookings come over).
         </div>
 
       </div>
@@ -751,6 +921,29 @@ function PreviewTable({ type, rows }) {
             <Td>{r.name}</Td><Td>{r.email || '—'}</Td><Td>{r.phone || '—'}</Td><Td>{r.birthday || '—'}</Td>
           </tr>
         ))}</tbody>
+      </table>
+    );
+  }
+  if (type === 'appointments') {
+    return (
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead><tr style={{ background: 'var(--pn-bg)' }}>
+          <Th>Date</Th><Th>Time</Th><Th>Client</Th><Th>Tech</Th><Th>Services</Th><Th>Mins</Th><Th>Status</Th>
+        </tr></thead>
+        <tbody>{rows.map((r, i) => {
+          const svcNames = (r.services || []).map(s => s.name).join(', ');
+          return (
+            <tr key={i} style={{ borderTop: '1px solid var(--pn-border)' }}>
+              <Td>{r.date}</Td>
+              <Td>{r.startTime}</Td>
+              <Td>{r.clientName}</Td>
+              <Td>{r.techName || '—'}</Td>
+              <Td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={svcNames}>{svcNames || '—'}</Td>
+              <Td>{r.duration}</Td>
+              <Td>{r.status}</Td>
+            </tr>
+          );
+        })}</tbody>
       </table>
     );
   }

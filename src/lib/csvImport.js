@@ -223,6 +223,39 @@ export function missingTechNames(referenced, existingNames) {
   return (referenced || []).filter(n => !have.has(String(n).trim().toLowerCase()));
 }
 
+// GG's Appointments CSV has one row per service line, so a multi-service
+// booking arrives as several rows sharing date + start time + client + tech.
+// Merge those into one appointment (services concatenated, duration summed)
+// or the calendar would show overlapping duplicate blocks.
+export function mergeAppointmentRows(rows) {
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const byKey = new Map();
+  const out = [];
+  for (const a of rows || []) {
+    const key = `${a.date}|${a.startTime}|${norm(a.clientName)}|${norm(a.techName)}`;
+    const ex = byKey.get(key);
+    if (!ex) { byKey.set(key, a); out.push(a); continue; }
+    ex.services = [...ex.services, ...a.services];
+    ex.duration = (ex.duration || 0) + (a.duration || 0);
+    if (a.notes && !(ex.notes || '').includes(a.notes)) ex.notes = ex.notes ? `${ex.notes}\n${a.notes}` : a.notes;
+    if (ex.status === 'cancelled' && a.status !== 'cancelled') ex.status = a.status;
+  }
+  return out;
+}
+
+// The schedule grid places an appointment by exact techName match against the
+// roster, so imported names must adopt the roster's exact casing/spacing or
+// the block never renders.
+export function normalizeApptTechNames(appts, rosterNames) {
+  const byNorm = new Map();
+  (rosterNames || []).forEach(n => { if (n) byNorm.set(String(n).trim().toLowerCase(), n); });
+  (appts || []).forEach(a => {
+    const hit = byNorm.get(String(a.techName || '').trim().toLowerCase());
+    if (hit) a.techName = hit;
+  });
+  return appts;
+}
+
 // Normalize a name for case/whitespace-insensitive lookup.
 export function clientKey(name) {
   return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
