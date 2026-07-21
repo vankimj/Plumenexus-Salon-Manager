@@ -685,6 +685,7 @@ export default function ScheduleScreen({ navigation }) {
         prefill={createPrefill}
         editAppt={editAppt}
         gateBlocked={clockGateBlocked}
+        settings={settings}
         onClose={() => { setCreatePrefill(null); setEditAppt(null); }}
         onCreated={() => { setCreatePrefill(null); setEditAppt(null); reloadTimeOff(); }}
       />
@@ -1309,7 +1310,7 @@ function WeekView({ date, techName, showAll, allTechs, clientsById, workDays, ti
 // in edit mode. The two are mutually exclusive — caller picks which.
 // In edit mode the title/CTA flip to "Edit appointment" / "Save changes"
 // and save goes through updateAppointment instead of createAppointment.
-function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated }) {
+function CreateApptModal({ prefill, editAppt, gateBlocked, settings, onClose, onCreated }) {
   // CRITICAL: every hook below runs on every render regardless of
   // open state. Conditional rendering is INSIDE the JSX, never via
   // an early return between hook calls.
@@ -1518,9 +1519,10 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated })
       }
       // The appointment must fit inside the day's bookable window (store hours
       // widened by appointment hours) — parity with web ScheduleAdmin's hard
-      // block. Skip only while settings are still loading.
+      // block. Skip only while settings are still loading. In edit mode
+      // prefill is null (mutually exclusive props) — use the appt's own date.
       if (settings) {
-        const dow = new Date(prefill.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        const dow = new Date((isEdit ? editAppt.date : prefill.date) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
         const win = bookableWindow(settings, dow);
         const endMin = hhmmToMin(startStr) + totalDuration;
         if (endMin > win.close) {
