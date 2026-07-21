@@ -4632,7 +4632,9 @@ function HoursModal({ settings, updateSettings, onClose }) {
           hours: storeHoursToWebfrontHours(hours),
           bookingHours: {
             storeHours: hours,
-            apptHours: { open: apptOpen, close: apptClose },
+            // Salon-wide appt hours are gone (per-tech now); mirror the legacy
+            // settings.apptHours migration fallback described above.
+            apptHours: settings.apptHours || null,
             walkIn: settings.walkIn || null,
           },
         });
