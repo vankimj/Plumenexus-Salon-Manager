@@ -48,7 +48,7 @@ const CrudRow = memo(function CrudRow({ item, styles, canEdit, dangerColor, titl
 
 export default function ManageCrud({
   load, create, save, remove, canEdit = false, blank, fields,
-  titleOf, subtitleOf, addLabel = 'Add', headerNote,
+  titleOf, subtitleOf, addLabel = 'Add', headerNote, headerAction,
 }) {
   const { contentMaxWidth } = useResponsive();
   const { theme } = useTheme();
@@ -120,7 +120,12 @@ export default function ManageCrud({
         keyExtractor={(it) => it.id}
         contentContainerStyle={{ padding: 14, paddingBottom: 90, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={theme.green} />}
-        ListHeaderComponent={headerNote ? <Text style={styles.note}>{headerNote(items)}</Text> : null}
+        ListHeaderComponent={(headerAction || headerNote) ? (
+          <View>
+            {headerAction || null}
+            {headerNote ? <Text style={styles.note}>{headerNote(items)}</Text> : null}
+          </View>
+        ) : null}
         ListEmptyComponent={<Text style={styles.empty}>Nothing here yet.</Text>}
         renderItem={renderItem}
       />

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import ManageCrud from './ManageCrud';
+import StaffImportSheet from './StaffImportSheet';
 import useTenantAccess from '../../hooks/useTenantAccess';
 import useTrashHeader from '../../hooks/useTrashHeader';
 import { fetchEmployees, createEmployee, saveEmployee, deleteEmployee, fetchServices, setEmployeePin, clearEmployeePin, addTechUserForEmployee } from '../../lib/firestore';
@@ -68,11 +69,18 @@ const BASE_FIELDS = [
 
 export default function EmployeesScreen({ navigation }) {
   const { isAdmin } = useTenantAccess();
+  const { theme } = useTheme();
   useTrashHeader(navigation, ['employees'], isAdmin);
   // Services power the "Services performed" multiselect (serviceIds). Same
   // field the web EmployeesAdmin edits + the booking/schedule flow reads.
   const [services, setServices] = useState([]);
   useEffect(() => { fetchServices().then(s => setServices(s || [])).catch(() => setServices([])); }, []);
+  // Screenshot-import state. `emps` feeds the importer its existing names +
+  // next sortOrder; `refreshKey` remounts ManageCrud so the list reloads after.
+  const [importing, setImporting] = useState(false);
+  const [emps, setEmps] = useState([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => { fetchEmployees().then(e => setEmps(e || [])).catch(() => setEmps([])); }, [refreshKey]);
 
   const fields = [
     ...BASE_FIELDS,
@@ -92,7 +100,17 @@ export default function EmployeesScreen({ navigation }) {
   ];
 
   return (
+    <>
     <ManageCrud
+      key={refreshKey}
+      headerAction={isAdmin ? (
+        <TouchableOpacity
+          onPress={() => setImporting(true)}
+          style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginBottom: 10 }}
+        >
+          <Text style={{ color: theme.green, fontWeight: '600' }}>📷 Import staff from screenshots</Text>
+        </TouchableOpacity>
+      ) : null}
       load={fetchEmployees}
       create={async (item) => {
         const id = await createEmployee(item);
@@ -116,5 +134,13 @@ export default function EmployeesScreen({ navigation }) {
       }}
       addLabel="New staff member"
     />
+    <StaffImportSheet
+      visible={importing}
+      existingNames={emps.map(e => e.name)}
+      nextSortOrder={emps.length}
+      onClose={() => setImporting(false)}
+      onCreated={(n) => { setImporting(false); setRefreshKey(k => k + 1); Alert.alert('Imported', `Added ${n} staff member${n === 1 ? '' : 's'}.`); }}
+    />
+    </>
   );
 }
