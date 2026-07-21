@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import ManageCrud from './ManageCrud';
+import StaffImportSheet from './StaffImportSheet';
 import useTenantAccess from '../../hooks/useTenantAccess';
 import useTrashHeader from '../../hooks/useTrashHeader';
-import { fetchEmployees, createEmployee, saveEmployee, deleteEmployee, fetchServices, setEmployeePin, clearEmployeePin } from '../../lib/firestore';
+import { fetchEmployees, createEmployee, saveEmployee, deleteEmployee, fetchServices, setEmployeePin, clearEmployeePin, addTechUserForEmployee } from '../../lib/firestore';
 import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 
 // Set / change / clear a tech's 4-digit clock-in PIN (scrypt-hashed server-side
@@ -68,11 +69,18 @@ const BASE_FIELDS = [
 
 export default function EmployeesScreen({ navigation }) {
   const { isAdmin } = useTenantAccess();
+  const { theme } = useTheme();
   useTrashHeader(navigation, ['employees'], isAdmin);
   // Services power the "Services performed" multiselect (serviceIds). Same
   // field the web EmployeesAdmin edits + the booking/schedule flow reads.
   const [services, setServices] = useState([]);
   useEffect(() => { fetchServices().then(s => setServices(s || [])).catch(() => setServices([])); }, []);
+  // Screenshot-import state. `emps` feeds the importer its existing names +
+  // next sortOrder; `refreshKey` remounts ManageCrud so the list reloads after.
+  const [importing, setImporting] = useState(false);
+  const [emps, setEmps] = useState([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => { fetchEmployees().then(e => setEmps(e || [])).catch(() => setEmps([])); }, [refreshKey]);
 
   const fields = [
     ...BASE_FIELDS,
@@ -80,6 +88,9 @@ export default function EmployeesScreen({ navigation }) {
       key: 'serviceIds', label: 'Services performed', type: 'multiselect',
       options: services.filter(s => s.active !== false).map(s => ({ value: s.id, label: s.name })),
       emptyLabel: 'Add services first (Manage → Services).',
+      // A tech performs every service by default — no "can do nothing" state.
+      // Empty (or full) shows all chips on; unchecking the last snaps back to all.
+      emptyMeansAll: true,
     },
     {
       key: 'pin', label: 'Clock-in PIN', type: 'custom',
@@ -89,9 +100,27 @@ export default function EmployeesScreen({ navigation }) {
   ];
 
   return (
+    <>
     <ManageCrud
+      key={refreshKey}
+      headerAction={isAdmin ? (
+        <TouchableOpacity
+          onPress={() => setImporting(true)}
+          style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 10, paddingVertical: 11, alignItems: 'center', marginBottom: 10 }}
+        >
+          <Text style={{ color: theme.green, fontWeight: '600' }}>📷 Import staff from screenshots</Text>
+        </TouchableOpacity>
+      ) : null}
       load={fetchEmployees}
-      create={createEmployee}
+      create={async (item) => {
+        const id = await createEmployee(item);
+        // Auto-grant a 'tech' login when the new hire has an email (parity with
+        // web). Best-effort — a grant failure must not undo the created employee.
+        if ((item.email || '').trim()) {
+          try { await addTechUserForEmployee(item); } catch (e) { console.warn('[Employees] auto tech-user grant failed:', e?.message || e); }
+        }
+        return id;
+      }}
       save={saveEmployee}
       remove={deleteEmployee}
       canEdit={isAdmin}
@@ -103,7 +132,15 @@ export default function EmployeesScreen({ navigation }) {
         return [e.email, e.phone].filter(Boolean).join(' · ')
           || (n ? `${n} service${n === 1 ? '' : 's'}` : (e.active === false ? 'inactive' : '—'));
       }}
-      addLabel="New employee"
+      addLabel="New staff member"
     />
+    <StaffImportSheet
+      visible={importing}
+      existingNames={emps.map(e => e.name)}
+      nextSortOrder={emps.length}
+      onClose={() => setImporting(false)}
+      onCreated={(n) => { setImporting(false); setRefreshKey(k => k + 1); Alert.alert('Imported', `Added ${n} staff member${n === 1 ? '' : 's'}.`); }}
+    />
+    </>
   );
 }

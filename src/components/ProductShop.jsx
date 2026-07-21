@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { fetchPublicStore } from '../lib/firestore';
+import { TENANT_ID } from '../lib/tenant';
 
 // Public product shop. Reached at `/?store` (optionally `&tid=`). Reads safe
 // product fields via getPublicStore; "Buy" collects an email and mints a
@@ -21,7 +22,10 @@ const priceLabel = (p) =>
 
 export default function ProductShop() {
   const params = new URLSearchParams(window.location.search);
-  const tid = params.get('tid') || undefined;
+  // Default to the subdomain-resolved tenant (TENANT_ID) so a customer at
+  // {trainer}.plumenexus.com/?store sees THAT trainer's shop — not the
+  // platform default. An explicit ?tid= still overrides (e.g. embeds).
+  const tid = params.get('tid') || TENANT_ID;
   const outcome = params.get('store'); // '' | 'success' | 'cancel'
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);

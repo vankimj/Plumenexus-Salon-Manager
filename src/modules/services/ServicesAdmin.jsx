@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import Button from '../../components/Button';
-import { fetchServices, createService, saveService, deleteService, servicesExist, clearServices } from '../../lib/firestore';
+import { fetchServices, createService, saveService, deleteService, servicesExist, clearServices, fetchBookingConfig, updateBookingConfig, replaceCategoryDisplay } from '../../lib/firestore';
 import { groupByCategory, formatPrice, formatDuration, validateService, blankService } from '../../utils/serviceHelpers';
 import TrashButton from '../../components/TrashButton';
 import { SEED_SERVICES, CATEGORY_ORDER } from '../../data/seedServices';
@@ -17,6 +17,7 @@ import { fetchOnboarding } from '../../lib/onboarding';
 export default function ServicesAdmin() {
   const { isTech, showToast, settings } = useApp();
   const [services,   setServices]   = useState([]);
+  const [categoryDisplay, setCategoryDisplay] = useState({}); // bookingConfig.categoryDisplay — per-category { hideOthersOnSelect }
   const [loading,    setLoading]    = useState(true);
   const [editing,    setEditing]    = useState(null);
   const [saving,     setSaving]     = useState(false);
@@ -47,11 +48,82 @@ export default function ServicesAdmin() {
         svcs = await fetchServices();
       }
       setServices(svcs);
+      try { const c = await fetchBookingConfig(); setCategoryDisplay(c?.categoryDisplay || {}); } catch { /* config optional */ }
     } catch (e) {
       console.error('[ServicesAdmin] load failed:', e);
     } finally {
       setLoading(false);
     }
+  }
+
+  // Per-category booking-display toggle: hide the other options in a pick-one
+  // category once one is chosen (vs. the default grey-out). Merge-safe write so
+  // it never clobbers the rest of the booking config.
+  async function toggleCategoryHide(category) {
+    const cur  = !!categoryDisplay[category]?.hideOthersOnSelect;
+    const next = { ...categoryDisplay, [category]: { ...(categoryDisplay[category] || {}), hideOthersOnSelect: !cur } };
+    setCategoryDisplay(next);
+    try {
+      await updateBookingConfig({ categoryDisplay: next });
+      showToast(!cur ? `${category}: other options will hide when one is picked` : `${category}: other options will gray out`);
+    } catch {
+      setCategoryDisplay(categoryDisplay); // revert on failure
+      showToast('Could not save — try again');
+    }
+  }
+
+  // Main vs sub-option: a "sub-option" category is hidden from the main booking
+  // menu — its services are only offered as add-ons on the main services they're
+  // linked to (via each service's "Add-ons offered" list). Merge-safe write.
+  async function toggleCategorySubOption(category) {
+    const cur  = !!categoryDisplay[category]?.subOption;
+    const next = { ...categoryDisplay, [category]: { ...(categoryDisplay[category] || {}), subOption: !cur } };
+    setCategoryDisplay(next);
+    try {
+      await updateBookingConfig({ categoryDisplay: next });
+      showToast(!cur ? `${category}: now a sub-option — hidden from the menu, offered as add-ons` : `${category}: now a main selection on the booking menu`);
+    } catch {
+      setCategoryDisplay(categoryDisplay); // revert on failure
+      showToast('Could not save — try again');
+    }
+  }
+
+  // Whole-category active/inactive. Inactive = hidden from the booking menu (and
+  // not offered as add-ons). Default (no flag) = active.
+  async function toggleCategoryActive(category) {
+    const cur  = categoryDisplay[category]?.active !== false; // currently active?
+    const next = { ...categoryDisplay, [category]: { ...(categoryDisplay[category] || {}), active: !cur } };
+    setCategoryDisplay(next);
+    try {
+      await updateBookingConfig({ categoryDisplay: next });
+      showToast(!cur ? `${category} is active` : `${category} hidden from booking (inactive)`);
+    } catch {
+      setCategoryDisplay(categoryDisplay);
+      showToast('Could not save — try again');
+    }
+  }
+
+  // Add / remove a category. A category is "registered" via a categoryDisplay
+  // entry (so it can exist with zero services); it also exists if any service
+  // uses its name. Remove is allowed only when the category has no services.
+  const [newCat, setNewCat] = useState('');
+  const [showAddCat, setShowAddCat] = useState(false);
+  async function addCategory() {
+    const n = newCat.trim();
+    if (!n) return;
+    if (categoryDisplay[n] || services.some(s => s.category === n)) { showToast('That category already exists'); return; }
+    const next = { ...categoryDisplay, [n]: { active: true } };
+    setCategoryDisplay(next); setNewCat(''); setShowAddCat(false);
+    try { await updateBookingConfig({ categoryDisplay: next }); showToast(`Added category "${n}" — add services to it below`); }
+    catch { setCategoryDisplay(categoryDisplay); showToast('Could not save — try again'); }
+  }
+  async function removeCategory(category) {
+    if (services.some(s => s.category === category)) { showToast('Move or delete its services first', 3500); return; }
+    if (!confirm(`Remove the empty category "${category}"?`)) return;
+    const next = { ...categoryDisplay }; delete next[category];
+    setCategoryDisplay(next);
+    try { await replaceCategoryDisplay(next); showToast(`Removed "${category}"`); }
+    catch { setCategoryDisplay(categoryDisplay); showToast('Could not save — try again'); }
   }
 
   // The legacy nail starter menu must seed ONLY for nail / legacy tenants. A
@@ -277,7 +349,11 @@ export default function ServicesAdmin() {
     }
   }
 
-  const groups = groupByCategory(services);
+  const baseGroups = groupByCategory(services);
+  const present = new Set(baseGroups.map(g => g.category));
+  const emptyCats = Object.keys(categoryDisplay).filter(c => !present.has(c)).sort();
+  const groups = [...baseGroups, ...emptyCats.map(c => ({ category: c, services: [] }))];
+  const allCategories = groups.map(g => g.category);
   const activeCount = services.filter(s => s.active !== false).length;
 
   if (loading) return <Empty>Loading services…</Empty>;
@@ -295,6 +371,19 @@ export default function ServicesAdmin() {
           {undoStack.length > 0 && <Btn onClick={handleUndo}>↩ Undo</Btn>}
           {redoStack.length > 0 && <Btn onClick={handleRedo}>↪ Redo</Btn>}
           <TrashButton collections={['services']} scope="Services" />
+          {!isTech && (showAddCat
+            ? (
+              <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input value={newCat} autoFocus placeholder="New category name"
+                  onChange={e => setNewCat(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addCategory(); if (e.key === 'Escape') { setShowAddCat(false); setNewCat(''); } }}
+                  style={{ padding: '5px 9px', borderRadius: 6, border: '1px solid var(--pn-border-strong)', background: 'var(--pn-bg)', color: 'var(--pn-text)', fontSize: 12, fontFamily: 'inherit', width: 150 }} />
+                <Btn color="#2D7A5F" onClick={addCategory}>Add</Btn>
+                <Btn onClick={() => { setShowAddCat(false); setNewCat(''); }}>Cancel</Btn>
+              </span>
+            )
+            : <Btn onClick={() => setShowAddCat(true)}>+ Category</Btn>
+          )}
           {!isTech && <Btn color="#3D95CE" onClick={() => { setEditing(blankService()); setErrors({}); }}>+ Add Service</Btn>}
         </div>
       </div>
@@ -310,10 +399,40 @@ export default function ServicesAdmin() {
 
       <style>{`@keyframes svcFade{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}`}</style>
       {groups.map(({ category, services: svcs }) => (
-        <div key={category} style={{ background: 'var(--pn-surface)', borderRadius: 12, border: '1px solid var(--pn-border)', marginBottom: 14, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 18px 10px', borderBottom: '1px solid var(--pn-border)', background: 'var(--pn-bg)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-            <span style={{ fontFamily: "'Cinzel', serif", fontSize: 12, fontWeight: 600, color: '#2D7A5F', letterSpacing: '.16em', textTransform: 'uppercase' }}>{category}</span>
-            <span style={{ fontFamily: "'Cinzel', serif", fontSize: 10, fontWeight: 500, color: 'var(--pn-text-faint)', letterSpacing: '.12em' }}>{svcs.length} {svcs.length === 1 ? 'service' : 'services'}</span>
+        <div key={category} style={{ background: 'var(--pn-surface)', borderRadius: 12, border: '1px solid var(--pn-border)', marginBottom: 14, overflow: 'hidden', opacity: categoryDisplay[category]?.active === false ? .55 : 1 }}>
+          <div style={{ padding: '12px 18px 10px', borderBottom: '1px solid var(--pn-border)', background: 'var(--pn-bg)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ fontFamily: "'Cinzel', serif", fontSize: 12, fontWeight: 600, color: '#2D7A5F', letterSpacing: '.16em', textTransform: 'uppercase' }}>{category}{categoryDisplay[category]?.active === false && <span style={{ marginLeft: 8, fontSize: 9, color: 'var(--pn-text-faint)' }}>(inactive)</span>}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              {!isTech && (
+                <label onClick={e => e.stopPropagation()}
+                  title="Whole category on/off. Inactive categories are hidden from the booking menu (and not offered as add-ons)."
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'var(--pn-text-muted)', letterSpacing: '.04em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <span>Active</span>
+                  <Toggle active={categoryDisplay[category]?.active !== false} onChange={() => toggleCategoryActive(category)} />
+                </label>
+              )}
+              {!isTech && (
+                <label onClick={e => e.stopPropagation()}
+                  title="Sub-option category: hidden from the main booking menu. Its services are offered only as add-ons on the main services you link them to (each service's 'Add-ons offered')."
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'var(--pn-text-muted)', letterSpacing: '.04em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <span>Sub-option</span>
+                  <Toggle active={!!categoryDisplay[category]?.subOption} onChange={() => toggleCategorySubOption(category)} />
+                </label>
+              )}
+              {!isTech && !categoryDisplay[category]?.subOption && svcs.some(s => s.categoryExclusive) && (
+                <label onClick={e => e.stopPropagation()}
+                  title="Pick-one category: when a client picks one option while booking, hide the other options here instead of graying them out."
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 10.5, color: 'var(--pn-text-muted)', letterSpacing: '.04em', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <span>Hide others when picked</span>
+                  <Toggle active={!!categoryDisplay[category]?.hideOthersOnSelect} onChange={() => toggleCategoryHide(category)} />
+                </label>
+              )}
+              <span style={{ fontFamily: "'Cinzel', serif", fontSize: 10, fontWeight: 500, color: 'var(--pn-text-faint)', letterSpacing: '.12em', whiteSpace: 'nowrap' }}>{svcs.length} {svcs.length === 1 ? 'service' : 'services'}</span>
+              {!isTech && svcs.length === 0 && (
+                <button onClick={() => removeCategory(category)} title="Remove this empty category"
+                  style={{ width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--pn-border-strong)', background: 'var(--pn-surface)', color: '#ef4444', cursor: 'pointer', fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontFamily: 'inherit' }}>×</button>
+              )}
+            </div>
           </div>
           {svcs.map((svc, i) => (
             <div key={svc.id}
@@ -340,6 +459,11 @@ export default function ServicesAdmin() {
               </div>
             </div>
           ))}
+          {svcs.length === 0 && (
+            <div style={{ padding: '14px 18px', fontSize: 12, color: 'var(--pn-text-faint)', fontStyle: 'italic' }}>
+              No services yet — add one with <strong>+ Add Service</strong> and pick “{category}”.
+            </div>
+          )}
         </div>
       ))}
 
@@ -347,6 +471,7 @@ export default function ServicesAdmin() {
         <ServiceModal
           svc={editing}
           allServices={services}
+          categories={allCategories}
           errors={errors}
           saving={saving}
           onChange={patch => setEditing(e => ({ ...e, ...patch }))}
@@ -385,7 +510,7 @@ function ServiceThumb({ image, name }) {
   );
 }
 
-function ServiceModal({ svc, allServices = [], errors, saving, onChange, onSave, onClose }) {
+function ServiceModal({ svc, allServices = [], categories = [], errors, saving, onChange, onSave, onClose }) {
   const isNew = !svc.id;
   const fileRef = useRef(null);
   const [imgErr, setImgErr] = useState(false);
@@ -441,7 +566,7 @@ function ServiceModal({ svc, allServices = [], errors, saving, onChange, onSave,
 
         <Field label="Category" error={errors.category}>
           <select value={svc.category} onChange={e => onChange({ category: e.target.value })} style={inputStyle}>
-            {CATEGORY_ORDER.map(c => <option key={c} value={c}>{c}</option>)}
+            {[...new Set([...categories, ...CATEGORY_ORDER])].map(c => <option key={c} value={c}>{c}</option>)}
             <option value="custom">Custom…</option>
           </select>
           {svc.category === 'custom' && (

@@ -184,7 +184,7 @@ export default function HeroMerakiSite({ webCfg, onSignIn }) {
   return (
     <div style={{ background: IVORY, color: INK, fontFamily: FONT_BODY, fontWeight: 300, lineHeight: 1.55, minHeight: '100vh', width: '100%', WebkitFontSmoothing: 'antialiased' }}>
 
-      <Nav narrow={narrow} onSignIn={onSignIn} salonName={salonName} />
+      <Nav narrow={narrow} salonName={salonName} />
 
       <Hero
         narrow={narrow}
@@ -326,7 +326,7 @@ function Pill({ children, href, variant = 'outline', onClick, target }) {
 
 /* ─────────────────────── nav ────────────────────────────────────── */
 
-function Nav({ narrow, onSignIn, salonName }) {
+function Nav({ narrow, salonName }) {
   return (
     <nav style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
@@ -348,12 +348,6 @@ function Nav({ narrow, onSignIn, salonName }) {
           </div>
         )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {!narrow && (
-            <a onClick={onSignIn} style={{
-              fontFamily: FONT_DISPLAY, fontSize: 11, letterSpacing: '.28em', textTransform: 'uppercase',
-              color: INK_FAINT, cursor: 'pointer', textDecoration: 'none',
-            }}>Sign in</a>
-          )}
           <Pill href="/book" variant="outline">Book now <span>→</span></Pill>
         </div>
       </div>

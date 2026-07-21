@@ -1,0 +1,23 @@
+# Gitleaks config — extends the default ruleset with a narrow allowlist.
+#
+# The Secret-scan CI job flagged mobile/eas.json's App Store Connect API key
+# fields. Those are key IDENTIFIERS (key id + issuer id — the equivalent of a
+# username), not secret material: the actual credential is the .p8 private key,
+# which lives outside the repo (~/.config/plumenexus/, 0600) and is referenced
+# by path only. Committing the id/issuer is the documented EAS/fastlane
+# pattern. Allowlist is scoped to exactly those fields in that one file so the
+# scanner still catches a real key pasted anywhere.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "ASC API key identifiers in eas.json (id + issuer are not secrets; the .p8 stays out of the repo)"
+regexTarget = "line"
+regexes = [
+  '''"ascApiKeyId"\s*:\s*"[A-Z0-9]{10}"''',
+  '''"ascApiKeyIssuerId"\s*:\s*"[0-9a-f-]{36}"''',
+]
+paths = [
+  '''mobile/eas\.json''',
+]

@@ -1904,13 +1904,13 @@ function PendingRow({ req, employees, onGrant }) {
           <select value={techName} onChange={e => setTechName(e.target.value)} style={sel}>
             <option value="">Assign tech…</option>
             {employees.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
-            <option value="__new__">＋ Create new employee</option>
+            <option value="__new__">＋ Create new staff member</option>
           </select>
           {isNew && (
             <input
               value={newName}
               onChange={e => setNewName(e.target.value)}
-              placeholder="Employee name"
+              placeholder="Staff member name"
               style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid #3D95CE', background: 'var(--pn-surface-alt)', fontFamily: 'inherit', width: 130, outline: 'none' }}
             />
           )}
@@ -3558,7 +3558,7 @@ function TechRemindersSection({ settings, updateSettings, nested = false }) {
     <Section title="🔔 Tech Appointment Reminders" keywords="tech appointment reminders sms text reminder birthday lapsed hour" nested={nested}>
       <div style={{ padding: '12px 16px' }}>
         <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5, marginBottom: 12 }}>
-          Sends each tech a heads-up before every scheduled appointment. Each tech sets their own lead time and notification channel (email / SMS / push) on their <strong>employee record → Profile → Notifications</strong>. Defaults: 15 min before, email. Runs every 5 minutes server-side; per-appt dedupe.
+          Sends each tech a heads-up before every scheduled appointment. Each tech sets their own lead time and notification channel (email / SMS / push) on their <strong>staff record → Profile → Notifications</strong>. Defaults: 15 min before, email. Runs every 5 minutes server-side; per-appt dedupe.
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, border: '1px solid var(--pn-border)', background: 'var(--pn-bg)', cursor: 'pointer' }}>
@@ -5177,7 +5177,7 @@ function IntegrityReportModal({ report, onClose, onJumpToTrash }) {
           <IntegrityCheckRow name="data/usersFull sync" check={checks.usersFullSync} renderDetail={c => `${c.staffEmails} staff in slim projection, ${c.usersFullStaff} in rich array`} />
           <IntegrityCheckRow name="Orphaned appointments" check={checks.orphanedAppointments} renderDetail={c => `${c.orphaned}/${c.total} (${c.pct}%) reference missing clients`} sampleKey="apptId" />
           <IntegrityCheckRow name="Orphaned receipts" check={checks.orphanedReceipts} renderDetail={c => `${c.orphaned}/${c.total} (${c.pct}%) reference missing appointments`} sampleKey="receiptId" />
-          <IntegrityCheckRow name="Employees without comp" check={checks.employeesWithoutComp} renderDetail={c => `${c.missing}/${c.total} (${c.pct}%) active employees missing tax/payroll info`} sampleKey="name" />
+          <IntegrityCheckRow name="Staff without comp" check={checks.employeesWithoutComp} renderDetail={c => `${c.missing}/${c.total} (${c.pct}%) active staff missing tax/payroll info`} sampleKey="name" />
           <IntegrityCheckRow name="Stale tombstones" check={checks.staleTombstones} renderDetail={c => c.total === 0 ? 'All purged on schedule' : `${c.total} tombstones older than 35 days — purge cron may not be running`} />
           <div style={{ marginTop: 16, padding: 10, fontSize: 11, color: 'var(--pn-text-muted)', background: 'var(--pn-bg)', borderRadius: 8, lineHeight: 1.55 }}>
             For specific deleted records, use the <button onClick={() => { onClose(); onJumpToTrash?.(); }} style={{ background: 'none', border: 'none', color: '#3D95CE', cursor: 'pointer', padding: 0, font: 'inherit' }}>Trash tab</button> or each detail view's ⏳ History button. Scanner runs nightly at 4am ET.

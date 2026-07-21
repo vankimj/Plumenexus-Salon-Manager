@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Switch, StyleSheet, Alert, Modal, Image, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { updateAppointment, fetchClient, saveClient } from '../../lib/firestore';
+import { refundSale } from '../../lib/firestore';
+import { genReceiptToken } from '../../lib/checkout';
 import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 
 const money = (n) => `$${(Number(n) || 0).toFixed(2)}`;
@@ -23,11 +24,13 @@ export default function RefundModal({ appt, onClose, onDone }) {
   const [photo,     setPhoto]     = useState('');
   const [addCredit, setAddCredit] = useState(false);
   const [saving,    setSaving]    = useState(false);
+  const [idemKey,   setIdemKey]   = useState('');
 
   useEffect(() => {
     if (appt) {
       setAmount(String(maxRefund || ''));
       setReason(''); setPhoto(''); setAddCredit(!!appt.clientId); setSaving(false);
+      setIdemKey(genReceiptToken(24));
     }
   }, [appt?.id]);
 
@@ -50,16 +53,17 @@ export default function RefundModal({ appt, onClose, onDone }) {
     if (saving) return;
     setSaving(true);
     try {
-      const refund = {
-        amount: amt, reason: reason.trim(), photo: photo || null,
-        addedCredit: addCredit && !!appt.clientId, refundedAt: new Date().toISOString(),
-      };
-      await updateAppointment(appt.id, { refund });
-      if (addCredit && appt.clientId) {
-        const c = await fetchClient(appt.clientId).catch(() => null);
-        if (c) await saveClient(appt.clientId, { credit: (Number(c.credit) || 0) + amt });
-      }
-      onDone?.(refund);
+      const toCredit = addCredit && !!appt.clientId;
+      const res = await refundSale({
+        receiptId: appt.receiptId || null,
+        apptId: appt.id,
+        amountCents: Math.round(amt * 100),
+        reason: reason.trim(),
+        refundTo: toCredit ? 'credit' : 'money',
+        idempotencyKey: idemKey,
+      });
+      if (!res?.ok) throw new Error(res?.error || 'Refund failed.');
+      onDone?.({ amount: amt, reason: reason.trim(), addedCredit: toCredit, refundedAt: new Date().toISOString() });
     } catch (e) {
       Alert.alert('Refund failed', e?.message || 'Please try again.');
       setSaving(false);

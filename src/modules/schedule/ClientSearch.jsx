@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { parsePhoneNumberFromString as lpnParse } from 'libphonenumber-js';
 
 // Self-contained so it can be unit-tested without dragging in ScheduleAdmin's
@@ -37,7 +37,7 @@ export default function ClientSearch({ clients, clientId, clientName, onChange }
 
   // Sort alphabetically client-side so the dropdown order is predictable
   // even if the upstream `clients` collection is unsorted.
-  const sortedAll = [...clients].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const sortedAll = useMemo(() => [...clients].sort((a, b) => (a.name || '').localeCompare(b.name || '')), [clients]);
   const filtered = query.length >= 1
     ? sortedAll.filter(c => c.name.toLowerCase().includes(query.toLowerCase()) || (c.phone || '').includes(query)).slice(0, 50)
     : sortedAll.slice(0, 100);

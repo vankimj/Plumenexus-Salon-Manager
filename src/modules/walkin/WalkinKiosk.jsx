@@ -607,7 +607,6 @@ function AddWalkinModal({ services, employees, clients, onClose, onAdded }) {
     setErr('');
     let resolvedId    = clientId;
     let resolvedName  = clientName.trim();
-    let resolvedPhone = clientPhone.trim();
 
     // New client flow: validate, create, then add to waitlist.
     if (newOpen) {
@@ -619,7 +618,6 @@ function AddWalkinModal({ services, employees, clients, onClose, onAdded }) {
       try {
         resolvedId    = await createClient({ name: n, phone: p });
         resolvedName  = n;
-        resolvedPhone = p;
       } catch (e) {
         setErr(e?.message || 'Could not create client');
         setSaving(false);
@@ -637,7 +635,6 @@ function AddWalkinModal({ services, employees, clients, onClose, onAdded }) {
         locationId:  currentLocationId(),
         clientId:    resolvedId,
         clientName:  resolvedName,
-        clientPhone: resolvedPhone,
         serviceName: serviceName || '',
         techName:    techName || 'Any',
         status:      'waiting',

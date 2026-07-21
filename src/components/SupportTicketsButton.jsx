@@ -138,7 +138,7 @@ function Picker({ onPick }) {
       <PickerCard
         accent={C.blue}
         title="Ask AI"
-        sub="Get instant help. The AI can walk you through anything, jump you to the right screen, or make changes for you (hours, services, employees, marketing copy)."
+        sub="Get instant help. The AI can walk you through anything, jump you to the right screen, or make changes for you (hours, services, staff, marketing copy)."
         cta="Open chat →"
         onClick={() => onPick('ai')}
       />
@@ -562,7 +562,7 @@ function describeAction(a) {
     case 'addService':       return `Added service: ${a.input?.name || ''}`;
     case 'updateService':    return `Updated service ${a.input?.serviceId || ''}`;
     case 'removeService':    return `Removed service ${a.input?.serviceId || ''}`;
-    case 'updateEmployee':   return `Updated employee ${a.input?.employeeId || ''}`;
+    case 'updateEmployee':   return `Updated staff member ${a.input?.employeeId || ''}`;
     case 'updateMarketingTemplate': return `Updated ${a.input?.templateKey || 'template'}`;
     default:                 return a.tool || 'action';
   }

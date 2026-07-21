@@ -222,7 +222,7 @@ function SlideEditor({ slide, onClose, onSave, styles, theme }) {
             {emps.length > 0 && (
               <>
                 <TouchableOpacity style={styles.importBtn} onPress={() => setShowEmps(v => !v)}>
-                  <Text style={styles.importBtnText}>↓ Import from employee</Text>
+                  <Text style={styles.importBtnText}>↓ Import from staff member</Text>
                 </TouchableOpacity>
                 {showEmps && emps.map(e => (
                   <TouchableOpacity key={e.id} style={styles.empRow} onPress={() => importEmp(e)}>

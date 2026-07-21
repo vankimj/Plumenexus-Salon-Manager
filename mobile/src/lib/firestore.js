@@ -4,7 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db, callFn, auth } from './firebase';
 import { getCurrentTenant } from './currentTenant';
-import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildCapEmails } from './userProjections';
+import { buildStaffEmails, buildAdminEmails, buildScheduleViewOnlyEmails, buildReadonlyEmails, buildCapEmails } from './userProjections';
 import { getCustomRoles } from './customRoles';
 
 // tenantCol/tenantDoc read getCurrentTenant() at CALL time so a tenant
@@ -125,8 +125,10 @@ export async function softDeleteRecurringSeries(groupId, by, { fromDate = null }
 }
 
 // ── Clients ────────────────────────────────────────────
-export async function fetchClients() {
-  const snap = await getDocs(query(tenantCol('clients'), orderBy('name')));
+export async function fetchClients({ max } = {}) {
+  const constraints = [orderBy('name')];
+  if (max) constraints.push(limit(max));
+  const snap = await getDocs(query(tenantCol('clients'), ...constraints));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
@@ -225,10 +227,26 @@ export function bustRefCache(kind) {
   for (const k of _refCache.keys()) if (!kind || k.endsWith(`:${kind}`)) _refCache.delete(k);
 }
 
+// Contact PII (phone/address/city/state/zip/notes) lives in the staff-only
+// employees/{id}/contact/info sub-doc, NOT on the world-readable parent doc.
+// `email` stays on the parent (login/account join-key + where('email') query).
+const CONTACT_EMP_FIELDS = ['phone', 'address', 'city', 'state', 'zip', 'notes'];
+const empContactRef = (id) => doc(tenantCol('employees'), id, 'contact', 'info');
+
 export async function fetchEmployees() {
   return cachedRef('employees', async () => {
     const snap = await getDocs(query(tenantCol('employees'), orderBy('sortOrder')));
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Staff app — merge the contact sub-doc so the directory / edit form still
+    // show phone etc. Guarded so a non-staff signed-in edge case degrades to
+    // the public slice rather than throwing.
+    if (auth?.currentUser) {
+      await Promise.all(list.map(async emp => {
+        try { const c = await getDoc(empContactRef(emp.id)); if (c.exists()) Object.assign(emp, c.data()); }
+        catch (_) { /* not staff — leave contact absent */ }
+      }));
+    }
+    return list;
   });
 }
 
@@ -239,9 +257,21 @@ export async function fetchEmployees() {
 // update their OWN doc (matched by email) for the editable fields,
 // which keeps comp data in employees/{id}/private/comp (admin-only).
 export async function saveEmployee(id, data) {
-  await setDoc(doc(tenantCol('employees'), id),
-    { ...data, updatedAt: new Date().toISOString() },
-    { merge: true });
+  // Split contact PII into the staff-only sub-doc and purge it from the
+  // world-readable parent. Batched so both land together (no re-leak window).
+  const publicFields = { ...data };
+  const contactFields = {};
+  const purge = {};
+  for (const k of CONTACT_EMP_FIELDS) {
+    if (k in publicFields) { contactFields[k] = publicFields[k]; delete publicFields[k]; purge[k] = deleteField(); }
+  }
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.set(doc(tenantCol('employees'), id), { ...purge, ...publicFields, updatedAt: now }, { merge: true });
+  if (Object.keys(contactFields).length) {
+    batch.set(empContactRef(id), { ...contactFields, updatedAt: now }, { merge: true });
+  }
+  await batch.commit();
   bustRefCache('employees');
 }
 
@@ -636,8 +666,8 @@ export async function resendReceiptEmail({ receiptId = null, viewToken = null, e
 // cash) or 'credit' (store credit, no money moves). Staff (admin or tech) may
 // call it; the server notifies all admins. `idempotencyKey` (stable per attempt)
 // makes a retry safe — no double refund or double credit.
-export async function refundSale({ receiptId, amountCents, reason, refundTo = 'money', commissionByTech, idempotencyKey }) {
-  const res = await callFn('refundSale')({ tenantId: getCurrentTenant(), receiptId, amountCents, reason, refundTo, commissionByTech, idempotencyKey });
+export async function refundSale({ receiptId = null, apptId = null, amountCents, reason, refundTo = 'money', commissionByTech, idempotencyKey }) {
+  const res = await callFn('refundSale')({ tenantId: getCurrentTenant(), receiptId, apptId, amountCents, reason, refundTo, commissionByTech, idempotencyKey });
   return res?.data || { ok: false };
 }
 // Staff-initiated customer cancellation notice (email + SMS, rebook link, no
@@ -729,6 +759,26 @@ export async function fetchGiftCardsByContact(qRaw) {
   });
   return out.slice(0, 25);
 }
+// Staff phone sign-in (SMS OTP → custom token). requestPhoneOtp is callable
+// unauthenticated (sign-in) or authenticated (link). verifyPhoneOtp returns a
+// custom token when signing in, or { linked:true } when linking.
+export async function requestPhoneOtp(phone) {
+  const res = await callFn('requestPhoneOtp')({ phone });
+  return res?.data || { ok: false };
+}
+export async function verifyPhoneOtp(phone, code) {
+  const res = await callFn('verifyPhoneOtp')({ phone, code });
+  return res?.data || { ok: false };
+}
+export async function unlinkPhoneSignin() {
+  const res = await callFn('unlinkPhoneSignin')({});
+  return res?.data || { ok: false };
+}
+export async function getPhoneSigninStatus() {
+  const res = await callFn('getPhoneSigninStatus')({});
+  return res?.data || { ok: false, linked: false };
+}
+
 // Stripe Terminal (Slice 2) — backend callables. The reader/Tap-to-Pay flow
 // that consumes these lives in lib/terminal.js (needs the native SDK + a
 // rebuild + a reader to run).
@@ -949,7 +999,7 @@ export async function fetchIntegrityReport() {
 
 // In-app feedback (bug/idea) submitted by staff. Admin triage.
 export async function fetchFeedback() {
-  const snap = await getDocs(query(tenantCol('feedback'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('feedback'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 export async function updateFeedbackStatus(id, status) {
@@ -961,11 +1011,24 @@ export async function updateFeedbackStatus(id, status) {
 // writeBatch split on web (data-integrity). Mobile intentionally edits
 // only the public doc (name/contact/social/active) — never comp.
 export async function createEmployee(data) {
-  const ref = await addDoc(tenantCol('employees'), {
-    ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  });
+  const publicFields = { ...data };
+  const contactFields = {};
+  for (const k of CONTACT_EMP_FIELDS) {
+    if (k in publicFields) { contactFields[k] = publicFields[k]; delete publicFields[k]; }
+  }
+  const now = new Date().toISOString();
+  const ref = await addDoc(tenantCol('employees'), { ...publicFields, createdAt: now, updatedAt: now });
+  if (Object.keys(contactFields).length) {
+    await setDoc(empContactRef(ref.id), { ...contactFields, createdAt: now, updatedAt: now }, { merge: true });
+  }
   bustRefCache('employees');
   return ref.id;
+}
+// Screenshot → staff import: server-side Claude vision extracts staff from
+// screenshots of the old system's roster. Caller reviews then createEmployee()s.
+export async function importStaffFromScreenshots(images) {
+  const res = await callFn('importStaffFromScreenshots')({ tenantId: getCurrentTenant(), images });
+  return res?.data || { staff: [] };
 }
 export async function deleteEmployee(id) {
   await softDelete(doc(tenantCol('employees'), id));
@@ -1029,8 +1092,13 @@ export async function fetchWaitlist(date = todayKey()) {
     .sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || ''));
 }
 export async function addWaitlistEntry(data) {
+  // World-readable doc (public kiosk reads it unauthenticated) — never store
+  // contact PII. Strip phone/email, keep a first-name-only label + clientId;
+  // staff resolve full contact via clientId -> client doc.
+  const { clientPhone: _p, clientEmail: _e, clientName, ...rest } = data || {};
+  const displayName = (clientName || '').trim().split(/\s+/)[0] || '';
   const ref = await addDoc(tenantCol('waitlist'), {
-    ...data, date: todayKey(), addedAt: new Date().toISOString(), status: 'waiting',
+    ...rest, clientName: displayName, date: todayKey(), addedAt: new Date().toISOString(), status: 'waiting',
   });
   return ref.id;
 }
@@ -1058,7 +1126,7 @@ export async function kioskWalkinOptions({ serviceId, requestedTechName } = {}) 
 
 // ── HR: bonuses / performance reviews / payroll (read) ──
 export async function fetchBonuses() {
-  const snap = await getDocs(query(tenantCol('bonuses'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('bonuses'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
 }
 export async function createBonus(data) {
@@ -1067,7 +1135,7 @@ export async function createBonus(data) {
 }
 export async function deleteBonus(id) { await softDelete(doc(tenantCol('bonuses'), id)); }
 export async function fetchReviews() {
-  const snap = await getDocs(query(tenantCol('reviews'), orderBy('createdAt', 'desc')));
+  const snap = await getDocs(query(tenantCol('reviews'), orderBy('createdAt', 'desc'), limit(200)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(notTombstoned);
 }
 export async function saveReview(id, data) {
@@ -1301,6 +1369,7 @@ async function saveUsers(users) {
     staffEmails: buildStaffEmails(users, overlay),
     adminEmails: buildAdminEmails(users, overlay),
     scheduleViewOnlyEmails: buildScheduleViewOnlyEmails(users),
+    readonlyEmails: buildReadonlyEmails(users),
     capEmails:   buildCapEmails(users, overlay),
   }, { merge: true });
   batch.set(tenantDoc('usersFull'), { users }, { merge: true });
@@ -1325,4 +1394,34 @@ export async function setUserRole(email, role, { techName, scheduleAccess } = {}
   });
   if (!found) throw new Error('User not found in the access list');
   await saveUsers(updated);
+}
+
+// Auto-grant a 'tech' login for a newly-created employee that has an email —
+// mirrors web EmployeesAdmin's addTechUsersForEmployees (single employee).
+// Appends a tech record if this email/techName isn't already in the access
+// list, then writes the atomic projection. No-op (returns {added:0}) when the
+// email is blank or the person already has access. Admin-only (saveUsers writes
+// the admin-gated users docs); best-effort callers should swallow failures so a
+// grant error never blocks employee creation.
+export async function addTechUserForEmployee(emp) {
+  const email = (emp?.email || '').trim();
+  if (!email) return { added: 0 };
+  const lower = email.toLowerCase();
+  const tn = (emp?.name || '').trim().toLowerCase();
+  const users = await fetchUsersFull();
+  const exists = users.some(u =>
+    (u.email || '').toLowerCase() === lower ||
+    (tn && (u.techName || '').toLowerCase() === tn));
+  if (exists) return { added: 0 };
+  await saveUsers([...users, {
+    email,
+    name:      emp.name || email,
+    picture:   emp.photo || '',
+    role:      'tech',
+    techName:  emp.name || null,
+    phone:     emp.phone || '',
+    instagram: emp.instagram || '',
+    grantedAt: new Date().toISOString(),
+  }]);
+  return { added: 1 };
 }

@@ -166,7 +166,7 @@ export default function Phase5Team({ onboarding, onAdvance, saving }) {
           </button>
         </form>
         <div style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginTop: 6 }}>
-          Photos, services, schedule, and compensation can be set later from Admin → Employees.
+          Photos, services, schedule, and compensation can be set later from Admin → Staff.
         </div>
       </Section>
 

@@ -4,6 +4,7 @@ import Icon from '../../components/Icon';
 import useTenantAccess from '../../hooks/useTenantAccess';
 import useResponsive from '../../hooks/useResponsive';
 import { getVisibleModules, moduleMeta } from '../../lib/modules';
+import { roleCan, roleExists } from '../../lib/rbac';
 import { fetchSettings, hasKioskPin } from '../../lib/firestore';
 import { setKioskLocked } from '../../lib/kioskLock';
 import { becomeKiosk } from '../../lib/kioskSession';
@@ -18,7 +19,12 @@ import { useTheme, useThemedStyles } from '../../theme/ThemeContext';
 export default function ManageGridScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
-  const { isAdmin, plan, loading: accessLoading } = useTenantAccess();
+  const { isAdmin, role, plan, loading: accessLoading } = useTenantAccess();
+  // Sales & Receipts is a hardcoded tile (not in getVisibleModules); gate it on
+  // the same 'reports' capability the Reports/Receipts tiles use, so a nail tech
+  // (staff role — no reports cap) doesn't see it. isAdmin always wins (an admin's
+  // granular role may resolve to a non-owner value; don't hide it from them).
+  const canReports = isAdmin || (roleExists(role) && roleCan(role, 'reports'));
   const { columns } = useResponsive();
   // 2 cols (phone) → 48.5%, 3 → 31.8%, 4 → 23.4%. space-between handles gaps.
   const tileW = columns === 2 ? '48.5%' : columns === 3 ? '31.8%' : '23.4%';
@@ -38,7 +44,7 @@ export default function ManageGridScreen({ navigation }) {
   // fall back to the coarse plan from useTenantAccess so plan gating
   // still applies (owner-disabled / hidden-tiles just won't).
   const effSettings = settings || (plan ? { plan } : { plan: 'starter' });
-  const visible = getVisibleModules(effSettings, { isAdmin });
+  const visible = getVisibleModules(effSettings, { isAdmin, role });
 
   function openModule(mod) {
     const meta = moduleMeta(mod.id);
@@ -147,6 +153,7 @@ export default function ManageGridScreen({ navigation }) {
           </TouchableOpacity>
         )}
 
+        {canReports && (
         <TouchableOpacity
           style={[styles.tile, { width: tileW }]}
           activeOpacity={0.7}
@@ -158,6 +165,7 @@ export default function ManageGridScreen({ navigation }) {
           <Text style={styles.tileLabel} numberOfLines={1}>Sales & Receipts</Text>
           <Text style={styles.tileDesc} numberOfLines={2}>Resend a receipt by text or email</Text>
         </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[styles.tile, { width: tileW }]}

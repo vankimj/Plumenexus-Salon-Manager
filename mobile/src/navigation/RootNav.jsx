@@ -11,8 +11,28 @@ import ProfileScreen  from '../screens/ProfileScreen';
 import HelpScreen     from '../screens/HelpScreen';
 import usePushRegistration from '../hooks/usePushRegistration';
 import { getCurrentTenant, subscribeTenant } from '../lib/currentTenant';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getPreviewAs, setPreviewAs, subscribePreviewAs } from '../lib/previewAs';
 import { useTheme } from '../theme/ThemeContext';
 import HeaderTitle from '../components/HeaderTitle';
+
+// App-wide "Preview as [role]" banner. Rendered above the whole navigator so an
+// admin previewing a role (which hides the Admin area) can ALWAYS exit — no
+// matter which screen they're on.
+function PreviewBanner() {
+  const insets = useSafeAreaInsets();
+  const [preview, setPreview] = useState(getPreviewAs());
+  useEffect(() => subscribePreviewAs(setPreview), []);
+  if (!preview) return null;
+  return (
+    <View style={{ backgroundColor: '#f59e0b', paddingTop: insets.top, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 9 }}>
+      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13, flex: 1 }} numberOfLines={1}>👁  Previewing as {preview.label || preview.role}</Text>
+      <TouchableOpacity onPress={() => setPreviewAs(null)} style={{ backgroundColor: 'rgba(255,255,255,.25)', borderRadius: 16, paddingVertical: 6, paddingHorizontal: 14 }}>
+        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Exit preview</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 const Tab = createBottomTabNavigator();
 
@@ -62,7 +82,9 @@ export default function RootNav() {
   // switching force a fresh fetch across all tabs without each screen
   // needing its own subscribeTenant subscription.
   const [tenantId, setTenantId] = useState(getCurrentTenant());
-  useEffect(() => subscribeTenant(setTenantId), []);
+  // Clear any active role preview when the tenant changes (or on sign-out) —
+  // a preview picked for one salon must never bleed into another.
+  useEffect(() => subscribeTenant((tid) => { setTenantId(tid); setPreviewAs(null); }), []);
 
   const { theme, scheme } = useTheme();
   // Drive React Navigation's own theme so headers, the tab bar, screen
@@ -95,7 +117,9 @@ export default function RootNav() {
   }), [theme]);
 
   return (
-    <NavigationContainer key={tenantId} theme={navTheme}>
+    <View style={{ flex: 1 }}>
+      <PreviewBanner />
+      <NavigationContainer key={tenantId} theme={navTheme}>
       <Tab.Navigator
         initialRouteName="Dashboard"
         screenOptions={screenOptions}
@@ -128,6 +152,7 @@ export default function RootNav() {
             shoved left with dead space on the right). */}
         <Tab.Screen name="Help" component={HelpScreen} options={{ title: 'Help & Support', tabBarItemStyle: { display: 'none' } }} />
       </Tab.Navigator>
-    </NavigationContainer>
+      </NavigationContainer>
+    </View>
   );
 }

@@ -10,6 +10,7 @@ import { useApp } from '../../context/AppContext';
 import { logActivity, logError } from '../../lib/logger';
 import { subscribeLocations, isMultiLocation, activeLocations, DEFAULT_LOCATION_ID } from '../../lib/locations';
 import EmptyState from '../../components/EmptyState';
+import StaffImportModal from './StaffImportModal';
 
 
 const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -19,6 +20,7 @@ function blankEmployee() {
   return {
     name: '', photo: '', active: true, sortOrder: 0, notes: '',
     extendedHoursAllowed: false,
+    apptHours: { open: '', close: '' },   // per-tech appointment-only window; blank = match store hours
     phone: '', email: '', hireDate: '',
     address: '', city: '', state: '', zip: '',
     tin: '',
@@ -33,13 +35,14 @@ function blankEmployee() {
 }
 
 export default function EmployeesAdmin() {
-  const { isAdmin, showToast, settings, updateSettings } = useApp();
+  const { isAdmin, showToast, settings, updateSettings, addTechUsersForEmployees } = useApp();
   const [employees, setEmployees] = useState([]);
   const [services,  setServices]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [editing,   setEditing]   = useState(null);
   const [viewing,   setViewing]   = useState(null);
   const [seeding,   setSeeding]   = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -67,6 +70,19 @@ export default function EmployeesAdmin() {
       } else {
         await createEmployee({ ...emp, sortOrder: employees.length });
         logActivity('employee_created', emp.name);
+        // A new hire with an email is auto-granted a 'tech' login (Users &
+        // Roles) so they can sign in and see their schedule/earnings right
+        // away — no separate "add user" step. Admin-only path (this screen is
+        // admin-gated and saveUsers is admin-only). Deduped by email/techName,
+        // so re-adding an existing tech is a no-op. Best-effort: a failed grant
+        // never blocks the employee from being created.
+        const inviteEmail = (emp.email || '').trim();
+        if (inviteEmail) {
+          try {
+            const r = await addTechUsersForEmployees([emp]);
+            if (r?.added) showToast(`${emp.name} added as a tech — they can sign in with ${inviteEmail}`);
+          } catch (e) { console.warn('[Employees] auto tech-user grant failed:', e?.message || e); }
+        }
       }
       await load();
       setEditing(null);
@@ -91,7 +107,7 @@ export default function EmployeesAdmin() {
 
   async function handleSendInvite(emp) {
     if (!emp.email) {
-      showToast('Add an email to this employee first', 3000);
+      showToast('Add an email to this staff member first', 3000);
       return;
     }
     try {
@@ -119,7 +135,7 @@ export default function EmployeesAdmin() {
   }
 
 async function assignAllServicesToAll() {
-    if (!confirm(`Mark every employee as able to perform all ${services.length} services? You can fine-tune individual techs after.`)) return;
+    if (!confirm(`Mark every staff member as able to perform all ${services.length} services? You can fine-tune individual techs after.`)) return;
     const allIds = services.map(s => s.id);
     try {
       for (const emp of employees) {
@@ -145,17 +161,28 @@ async function assignAllServicesToAll() {
             {seeding ? 'Adding…' : '↺ Seed from defaults'}
           </Btn>
         )}
-        <TrashButton collections={['employees']} scope="Employees" />
+        <TrashButton collections={['employees']} scope="Staff" />
+        <Btn color="#3D9E8A" onClick={() => setImporting(true)}>📷 Import from screenshots</Btn>
         <Btn color="#3D95CE" onClick={() => setEditing(blankEmployee())}>+ Add</Btn>
       </div>
+
+      {importing && (
+        <StaffImportModal
+          existingNames={employees.map(e => e.name)}
+          nextSortOrder={employees.length}
+          onClose={() => setImporting(false)}
+          onCreated={() => { setImporting(false); load(); }}
+        />
+      )}
 
       {employees.length === 0 ? (
         <EmptyState
           icon="💇"
           title="Add your team"
-          description="Each tech / stylist / barber gets a profile here — name, photo, services they perform, and (admin-only) compensation. The schedule renders one column per active employee."
+          description="Each tech / stylist / barber gets a profile here — name, photo, services they perform, and (admin-only) compensation. The schedule renders one column per active staff member."
           actions={[
-            { label: '+ Add an employee',  onClick: () => setEditing(blankEmployee()) },
+            { label: '+ Add a staff member',  onClick: () => setEditing(blankEmployee()) },
+            { label: '📷 Import from screenshots', onClick: () => setImporting(true) },
             { label: '↺ Use sample staff', onClick: seedEmployees },
           ]}
         />
@@ -207,7 +234,9 @@ async function assignAllServicesToAll() {
 
 function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onToggleActive, onSendInvite }) {
   const svcCount = emp.serviceIds?.length || 0;
-  const svcConfigured = svcCount > 0;
+  // An empty OR a full list both mean "performs all" — only a partial list is a
+  // configured subset (matches ServicesPicker's no-"nothing"-state model).
+  const svcConfigured = svcCount > 0 && svcCount < totalServices;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: last ? 'none' : '1px solid var(--pn-border)', opacity: emp.active ? 1 : .5 }}>
       <button onClick={onView}
@@ -224,9 +253,9 @@ function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onTog
           </button>
           {!emp.active && <span style={{ fontSize: 10, color: 'var(--pn-text-faint)', marginLeft: 6, fontWeight: 400 }}>inactive</span>}
           {totalServices > 0 && (
-            <span title={svcConfigured ? `Performs ${svcCount} of ${totalServices} services` : 'No services configured — defaults to all services'}
-              style={{ fontSize: 10, marginLeft: 8, padding: '1px 7px', borderRadius: 10, fontWeight: 600, background: svcConfigured ? 'var(--pn-info-bg)' : 'var(--pn-warning-bg)', color: svcConfigured ? 'var(--pn-info)' : 'var(--pn-warning)', border: `1px solid ${svcConfigured ? '#bfdbfe' : '#fde68a'}` }}>
-              {svcConfigured ? `${svcCount} svc` : 'all svc (default)'}
+            <span title={svcConfigured ? `Performs ${svcCount} of ${totalServices} services` : 'Performs all services'}
+              style={{ fontSize: 10, marginLeft: 8, padding: '1px 7px', borderRadius: 10, fontWeight: 600, background: 'var(--pn-info-bg)', color: 'var(--pn-info)', border: '1px solid #bfdbfe' }}>
+              {svcConfigured ? `${svcCount} svc` : 'all svc'}
             </span>
           )}
         </div>
@@ -242,7 +271,7 @@ function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onTog
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         {emp.email && onSendInvite && (
           <button onClick={onSendInvite}
-            title={emp.inviteSentAt ? `Resend sign-in link (last sent ${new Date(emp.inviteSentAt).toLocaleDateString()})` : 'Send sign-in invite to this employee'}
+            title={emp.inviteSentAt ? `Resend sign-in link (last sent ${new Date(emp.inviteSentAt).toLocaleDateString()})` : 'Send sign-in invite to this staff member'}
             style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--pn-border)', background: emp.inviteSentAt ? 'var(--pn-surface-alt)' : 'var(--pn-surface)', color: '#6a4fa0', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600 }}>
             {emp.inviteSentAt ? '↻ Resend' : '📨 Invite'}
           </button>
@@ -324,7 +353,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
 
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--pn-border)', flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 600 }}>{isNew ? 'New Employee' : viewOnly ? (emp.name || 'Employee') : 'Edit Employee'}</span>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{isNew ? 'New Staff member' : viewOnly ? (emp.name || 'Staff member') : 'Edit Staff member'}</span>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: '50%', border: '1px solid var(--pn-border-strong)', background: 'var(--pn-surface)', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
         </div>
 
@@ -381,8 +410,23 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               </label>
               <label style={{ fontSize: 12, color: 'var(--pn-text-muted)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginTop: 8 }}>
                 <input type="checkbox" checked={!!emp.extendedHoursAllowed} onChange={e => onChange({ extendedHoursAllowed: e.target.checked })} />
-                Available during appointment-only hours
+                Can be booked outside store hours (appointment-only)
               </label>
+              {emp.extendedHoursAllowed && (
+                <div style={{ marginTop: 8, marginLeft: 22, padding: '10px 12px', background: 'var(--pn-bg)', border: '1px solid var(--pn-border)', borderRadius: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
+                    This tech's appointment-only window. Leave blank to match store hours (no extension). Can only widen store hours, not narrow them.
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--pn-text-muted)', width: 38 }}>Open</span>
+                    <input type="time" value={emp.apptHours?.open || ''} onChange={e => onChange({ apptHours: { ...(emp.apptHours || {}), open: e.target.value } })}
+                      style={{ fontFamily: 'inherit', border: '1px solid var(--pn-border-strong)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }} />
+                    <span style={{ fontSize: 12, color: 'var(--pn-text-muted)', width: 38, marginLeft: 8 }}>Close</span>
+                    <input type="time" value={emp.apptHours?.close || ''} onChange={e => onChange({ apptHours: { ...(emp.apptHours || {}), close: e.target.value } })}
+                      style={{ fontFamily: 'inherit', border: '1px solid var(--pn-border-strong)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }} />
+                  </div>
+                </div>
+              )}
 
               {/* ── Locations (multi-location tenants only) ──────────────
                   An employee with NO locations selected works at EVERY
@@ -511,11 +555,11 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
                   </div>
                   {!linkedUser ? (
                     <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5 }}>
-                      No app access yet for this employee. Grant access from <strong>Admin → Users</strong> first; the toggle will appear here once they're a tech-role user.
+                      No app access yet for this staff member. Grant access from <strong>Admin → Users</strong> first; the toggle will appear here once they're a tech-role user.
                     </div>
                   ) : linkedUser.role !== 'tech' ? (
                     <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5 }}>
-                      This employee logs in as <strong>{linkedUser.role}</strong>. Schedule edit permission only applies to tech-role users — admins and schedulers can already edit any schedule.
+                      This staff member logs in as <strong>{linkedUser.role}</strong>. Schedule edit permission only applies to tech-role users — admins and schedulers can already edit any schedule.
                     </div>
                   ) : (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -678,7 +722,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               <button onClick={onClose} style={{ flex: 1, ...btnBase }}>Close</button>
               {!isNew && isAdmin && (
                 <button onClick={() => setRestoreOpen(true)}
-                  title="Restore an earlier version of this employee from the BigQuery mirror"
+                  title="Restore an earlier version of this staff member from the BigQuery mirror"
                   style={{ ...btnBase, padding: '8px 12px', fontSize: 12, color: 'var(--pn-text-muted)' }}>
                   ⏳ History
                 </button>
@@ -695,7 +739,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               <button onClick={onClose} style={{ flex: 1, ...btnBase }}>Cancel</button>
               <button onClick={submit} disabled={saving || !emp.name?.trim()}
                 style={{ flex: 2, ...btnBase, background: '#3D95CE', color: '#fff', borderColor: '#3D95CE', opacity: (saving || !emp.name?.trim()) ? .6 : 1 }}>
-                {saving ? 'Saving…' : isNew ? 'Add Employee' : 'Save'}
+                {saving ? 'Saving…' : isNew ? 'Add Staff member' : 'Save'}
               </button>
             </>
           )}
@@ -715,7 +759,14 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
 }
 
 function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDurationsChange, prices = {}, onPricesChange }) {
-  const isAll = !selectedIds || selectedIds.length === 0;
+  const allIds = services.map(s => s.id);
+  // A tech can perform EVERY service by default — there is deliberately no
+  // "can do nothing" state. An empty list (or a full one) both mean "all", and
+  // the editor renders every box checked in that case. Unchecking the last
+  // remaining service snaps back to all, so a tech can never end up unable to
+  // perform anything. (Booking/scheduling read empty serviceIds as "all" too.)
+  const isAll = !selectedIds || selectedIds.length === 0 || selectedIds.length >= allIds.length;
+  const checkedSet = isAll ? new Set(allIds) : new Set(selectedIds);
   const grouped = {};
   services.forEach(s => {
     const cat = s.category || 'Other';
@@ -724,12 +775,13 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
   });
 
   function toggle(id) {
-    const set = new Set(selectedIds);
+    const set = new Set(checkedSet);
     if (set.has(id)) set.delete(id); else set.add(id);
-    onChange(Array.from(set));
+    // Empty or full both normalize to [] = "all" — never persist a no-service tech.
+    if (set.size === 0 || set.size >= allIds.length) { onChange([]); return; }
+    onChange(allIds.filter(x => set.has(x)));   // explicit subset, in menu order
   }
-  function selectAll() { onChange(services.map(s => s.id)); }
-  function clearAll()  { onChange([]); }
+  function selectAll() { onChange([]); }   // canonical "all"
 
   // Per-tech override minutes. Empty/0/invalid clears the override (falls
   // back to the service's base duration). Only stores explicit overrides.
@@ -754,14 +806,13 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
   return (
     <>
       <div style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-        Pick which services this tech can perform, and optionally set how long <em>this tech</em> takes ($ and minutes) per service.
-        Leave a field blank to use the service's standard price / time. {isAll && <strong style={{ color: '#16a34a' }}>No services checked = can do every service.</strong>}
+        Every tech can perform <strong>all services by default</strong> — uncheck the ones <em>this tech</em> doesn't do.
+        Optionally set how long this tech takes ($ and minutes) per service; leave a field blank to use the service's standard price / time.
       </div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        <button onClick={selectAll} style={{ ...btnBase, fontSize: 11, padding: '5px 10px' }}>Select all</button>
-        <button onClick={clearAll}  style={{ ...btnBase, fontSize: 11, padding: '5px 10px' }}>Clear all</button>
+        <button onClick={selectAll} disabled={isAll} style={{ ...btnBase, fontSize: 11, padding: '5px 10px', opacity: isAll ? 0.5 : 1 }}>Reset to all</button>
         <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--pn-text-faint)', alignSelf: 'center' }}>
-          {isAll ? 'all' : `${selectedIds.length} of ${services.length}`}
+          {isAll ? 'all services' : `${checkedSet.size} of ${services.length}`}
         </div>
       </div>
       {services.length === 0 ? (
@@ -771,8 +822,8 @@ function ServicesPicker({ services, selectedIds, onChange, durations = {}, onDur
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--pn-text-muted)', marginBottom: 6, letterSpacing: '.04em', textTransform: 'uppercase' }}>{cat}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 6 }}>
             {items.map(s => {
-              const checked = selectedIds.includes(s.id);
-              const canDo   = isAll || checked;
+              const checked = checkedSet.has(s.id);
+              const canDo   = checked;
               const override = durations[s.id];
               return (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 9px', borderRadius: 8, border: `1px solid ${checked ? '#3D95CE' : 'var(--pn-border)'}`, background: checked ? 'var(--pn-info-bg)' : 'var(--pn-bg)' }}>

@@ -66,6 +66,7 @@ export const CUSTOMER_EVENTS = [
   { key: 'cancellation_notice',  label: 'Cancellation notice',   desc: 'Tells the customer their appointment was cancelled.' },
   { key: 'receipt',              label: 'Receipt',               desc: 'Emailed / texted receipt after checkout.' },
   { key: 'review_request',       label: 'Review request',        desc: 'Asks the customer to leave a Google review.' },
+  { key: 'rebook_nudge',         label: 'Rebook reminder',       desc: 'Texts a past client a few weeks later when they have no upcoming appointment (marketing — opt-in only).' },
 ];
 
 const emptyRoleChannels = () => ({ push: false, email: false, sms: false });

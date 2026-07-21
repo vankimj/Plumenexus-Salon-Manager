@@ -192,6 +192,37 @@ export function buildReceiptsFromGg(payments, lineItems, clientLookup) {
   return receipts;
 }
 
+// Non-tech placeholders that should never become a staff record.
+const NON_TECH = new Set(['', 'walk-in', 'walkin', 'walk in', 'tbd', 'n/a', 'na', 'none', 'unknown', 'front desk']);
+
+// Distinct real tech names referenced by a set of receipts — receipt-level,
+// per-service, and any techSplit. Splits comma-joined multi-provider strings,
+// skips blanks/placeholders, dedupes case-insensitively (first spelling wins),
+// and returns original casing.
+export function collectTechNames(receipts) {
+  const seen = new Map(); // normalized -> original
+  const add = (raw) => String(raw || '').split(',').forEach(part => {
+    const name = part.trim();
+    const key = name.toLowerCase();
+    if (!name || NON_TECH.has(key) || seen.has(key)) return;
+    seen.set(key, name);
+  });
+  (receipts || []).forEach(r => {
+    add(r.techName);
+    (r.services || []).forEach(s => add(s.techName));
+    (r.payment && r.payment.techSplit || []).forEach(s => add(s.techName));
+  });
+  return [...seen.values()];
+}
+
+// Referenced tech names that have NO matching existing staff (case-insensitive).
+// These get auto-created as disabled "likely former staff" so historical revenue
+// stays attributed without cluttering the active roster.
+export function missingTechNames(referenced, existingNames) {
+  const have = new Set((existingNames || []).map(n => String(n || '').trim().toLowerCase()));
+  return (referenced || []).filter(n => !have.has(String(n).trim().toLowerCase()));
+}
+
 // Normalize a name for case/whitespace-insensitive lookup.
 export function clientKey(name) {
   return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');

@@ -10,7 +10,7 @@ import {
   softDeleteRecurringSeries, fetchSettings, fetchAttendance, notifyAppointmentCancelled,
   createTimeOff, deleteTimeOff,
 } from '../lib/firestore';
-import { isSalonOpenNow, clockedInNameSet, attendanceKey } from '../lib/shiftGate';
+import { isSalonOpenNow, clockedInNameSet, workingTechNames, attendanceKey, bookableWindow } from '../lib/shiftGate';
 import { notifyAffectedTechs } from '../lib/notifications';
 import { addApptToTab, removeApptFromTab, getCurrentTab, tabCount, tabTotal, subscribeTab, clearTab } from '../lib/currentTab';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
@@ -172,6 +172,16 @@ function fmtTime(t) {
   const [h, m] = t.split(':').map(Number);
   const ampm = h >= 12 ? 'PM' : 'AM';
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+// Compact hour-only label for the day-view time axis ("9 AM", "12 PM"). The
+// axis only ever renders on the hour, so the ":00" is redundant — dropping it
+// keeps the narrow left gutter from overflowing off-screen when iOS Dynamic
+// Type is turned up (the "times cut off on the left" bug).
+function fmtHourLabel(t) {
+  if (!t) return '';
+  const h = Number(t.split(':')[0]);
+  return `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
 function statusMeta(t) {
@@ -395,6 +405,14 @@ export default function ScheduleScreen({ navigation }) {
   // "multi-tech layout" — true unless we're scoped to exactly the user's own.
   const showAll = !ownOnly;
 
+  // "Working now" filter — the tech columns whose staff is currently clocked in
+  // (attendance is already loaded for the clock-in gate). Tapping the chip scopes
+  // the grid to exactly those; `workingNow` marks the chip active when the
+  // current selection equals that set.
+  const workingTechs = useMemo(() => workingTechNames(allTechs, attendance), [allTechs, attendance]);
+  const workingNow = canSeeAll && workingTechs.length > 0
+    && selectedTechs.size === workingTechs.length && workingTechs.every(t => selectedTechs.has(t));
+
   const filtered = useMemo(() => {
     if (everyone) return appts;                 // admin viewing everyone — include blank-tech appts too
     return appts.filter(a => visibleSet.has(a.techName || ''));
@@ -507,6 +525,15 @@ export default function ScheduleScreen({ navigation }) {
                 <Text style={ownOnly ? styles.chipBlueText : styles.chipMutedText}>👤 Just me</Text>
               </TouchableOpacity>
             )}
+            <TouchableOpacity
+              style={[styles.chip, workingNow ? styles.chipBlue : styles.chipMuted]}
+              onPress={() => {
+                if (!workingTechs.length) { Alert.alert('Working now', 'No one is clocked in right now.'); return; }
+                setSelectedTechs(new Set(workingTechs));
+              }}
+            >
+              <Text style={workingNow ? styles.chipBlueText : styles.chipMutedText}>🟢 Working now</Text>
+            </TouchableOpacity>
           </>
         )}
       </View>
@@ -804,7 +831,7 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
         <Text style={styles.dayOffBody}>
           {off
             ? `You're off from ${off.startDate}${off.endDate && off.endDate !== off.startDate ? ` to ${off.endDate}` : ''}.`
-            : `Your schedule shows you don't work this day of the week. Update your work days on the employees page if that's wrong.`}
+            : `Your schedule shows you don't work this day of the week. Update your work days on the staff page if that's wrong.`}
         </Text>
       </View>
     );
@@ -844,7 +871,7 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
             style={[styles.dayTimelineRow, { height: SLOT_PX }, !inWorkWindow && styles.dayTimelineRowOff, moving && styles.dayTimelineRowDrop]}
           >
             <View style={styles.dayTimeLabel}>
-              {isHourMark && <Text style={[styles.dayTimeLabelText, !inWorkWindow && { color: theme.textFaint }]}>{fmtTime(startTime)}</Text>}
+              {isHourMark && <Text numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.dayTimeLabelText, !inWorkWindow && { color: theme.textFaint }]}>{fmtHourLabel(startTime)}</Text>}
             </View>
             <View style={[styles.dayTimelineSlot, isHourMark && styles.dayTimelineSlotHour]}>
               {slotList.length ? (
@@ -927,7 +954,9 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
   // Column width adapts to how many techs are shown so filtering down (via the
   // chips above) fills the screen — 1–2 techs span the full width so gaps read
   // clearly; more techs fall back to a fixed width and scroll horizontally.
-  const AXIS_W = 52;
+  // 64pt fits "10:00 AM"/"12:00 PM" at fontSize 11 — 52 clipped the leading
+  // digit off the left screen edge (labels are right-anchored in the axis).
+  const AXIS_W = 64;
   const avail  = Math.max(0, screenW - AXIS_W);
   const fit    = techs.length > 0 ? Math.floor(avail / techs.length) : GRID_COL_W;
   const colW   = fit >= 132 ? Math.min(fit, 240) : GRID_COL_W;
@@ -964,15 +993,15 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
     >
       <View style={{ flexDirection: 'row' }}>
         {/* Fixed time axis */}
-        <View style={{ width: 52 }}>
+        <View style={{ width: AXIS_W }}>
           <View style={{ height: GRID_HEADER_H }} />
           <View style={{ height: GRID_H }}>
             {Array.from({ length: SLOT_COUNT }).map((_, idx) => {
               const slotMin = DAY_START_MIN + idx * SLOT_MINUTES;
               if (slotMin % 60 !== 0) return null;
               return (
-                <Text key={idx} style={[styles.gridTimeLabel, { top: idx * SLOT_PX - 7 }]}>
-                  {fmtTime(minToHHMM(slotMin))}
+                <Text key={idx} numberOfLines={1} maxFontSizeMultiplier={1.3} style={[styles.gridTimeLabel, { top: idx * SLOT_PX - 7 }]}>
+                  {fmtHourLabel(minToHHMM(slotMin))}
                 </Text>
               );
             })}
@@ -1386,7 +1415,9 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated })
   // that should narrow with search.
   const filteredClients = useMemo(() => {
     const q = clientQuery.trim().toLowerCase();
-    if (!q) return clients.slice(0, 200);
+    // No query: show only the first 30 (staff search by name) so tapping a slot
+    // doesn't mount hundreds of TouchableOpacity rows in a non-virtualized list.
+    if (!q) return clients.slice(0, 30);
     return clients.filter(c => (c.name || '').toLowerCase().includes(q)).slice(0, 200);
   }, [clientQuery, clients]);
 
@@ -1484,6 +1515,19 @@ function CreateApptModal({ prefill, editAppt, gateBlocked, onClose, onCreated })
       if (!validTime(startStr)) {
         Alert.alert('Start time not valid', 'Use 24-hour HH:MM format (e.g. 14:30).');
         return;
+      }
+      // The appointment must fit inside the day's bookable window (store hours
+      // widened by appointment hours) — parity with web ScheduleAdmin's hard
+      // block. Skip only while settings are still loading.
+      if (settings) {
+        const dow = new Date(prefill.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+        const win = bookableWindow(settings, dow);
+        const endMin = hhmmToMin(startStr) + totalDuration;
+        if (endMin > win.close) {
+          const fmt = (m) => { const h = Math.floor(m / 60), mm = m % 60, ap = h >= 12 ? 'PM' : 'AM', hh = h > 12 ? h - 12 : h === 0 ? 12 : h; return `${hh}:${String(mm).padStart(2, '0')} ${ap}`; };
+          Alert.alert('Past bookable hours', `This ${totalDuration}-minute appointment would end at ${fmt(endMin)}, after the latest bookable time (${fmt(win.close)}). Shorten it or start earlier.`);
+          return;
+        }
       }
     }
     if (gateBlocked && gateBlocked()) return;
@@ -2439,7 +2483,7 @@ const makeStyles = (t) => StyleSheet.create({
   dayApptClient:      { fontSize: 13, fontWeight: '700', color: t.text },
   dayApptMeta:        { fontSize: 11, color: t.textMuted, marginTop: 2 },
   dayEmptyHint:       { fontSize: 22, color: t.textMuted, textAlign: 'center', lineHeight: 26, fontWeight: '800' },
-  gridTimeLabel:      { position: 'absolute', right: 6, fontSize: 11, color: t.textMuted, fontWeight: '600' },
+  gridTimeLabel:      { position: 'absolute', left: 0, width: 46, textAlign: 'right', fontSize: 11, color: t.textMuted, fontWeight: '600' },
   gridHeadCell:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: t.border, borderLeftWidth: 1, borderLeftColor: t.border, backgroundColor: t.surfaceAlt },
   gridHeadDot:        { width: 8, height: 8, borderRadius: 4 },
   gridHeadText:       { fontSize: 12.5, fontWeight: '800', color: t.text, flexShrink: 1 },

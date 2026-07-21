@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
-import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInAnonymously } from 'firebase/auth';
+import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInWithEmailAndPassword, signInWithCustomToken, signInAnonymously } from 'firebase/auth';
 import Constants from 'expo-constants';
 import Svg, { Path } from 'react-native-svg';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
+import { requestPhoneOtp, verifyPhoneOtp } from '../lib/firestore';
 import { useThemedStyles } from '../theme/ThemeContext';
 
 // Official Google "G" mark (4-color) for the Sign in with Google button.
@@ -40,7 +41,10 @@ function randomNonce(len = 32) {
 // 721171829996 clients were from the pre-migration project and rejected
 // id_tokens as invalid_audience.
 const WEB_CLIENT_ID = '563347750501-jlmqatcbesk7r9ltou2sl928sgmtk606.apps.googleusercontent.com';
-const IOS_CLIENT_ID = '563347750501-n1pe3i700s6fh75cpu1sspjjd63n04oa.apps.googleusercontent.com';
+// iOS client is bundle-id-bound: this one belongs to com.plumenexus.salon
+// (Plume Nexus LLC team). The old n1pe3i700s… client was bound to the retired
+// app.plumenexus.pro bundle under JVK.
+const IOS_CLIENT_ID = '563347750501-7pk04kolq41bgbfkhjo8c5dkmu233p1n.apps.googleusercontent.com';
 
 // In Expo Go the native module isn't available — guard the configure
 // call so the screen still renders (with the dev-anonymous fallback).
@@ -59,10 +63,64 @@ export default function AuthScreen() {
   // on iOS 13+ builds that include expo-apple-authentication). Keeps this safe to
   // ship to a build that predates the native rebuild — the button just hides.
   const [appleAvailable, setAppleAvailable] = useState(false);
+  // Email/password path — staff whose salon provisioned a password login
+  // (no Google/Apple account needed) and App Review demo credentials.
+  const [showEmail, setShowEmail] = useState(false);
+  const [email,     setEmail]     = useState('');
+  const [password,  setPassword]  = useState('');
+  // Phone sign-in — staff who linked their number in Profile. Two steps:
+  // enter phone → receive code → enter code → custom-token sign-in.
+  const [showPhone, setShowPhone] = useState(false);
+  const [phone,     setPhone]     = useState('');
+  const [otpCode,   setOtpCode]   = useState('');
+  const [otpSent,   setOtpSent]   = useState(false);
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
   const styles = useThemedStyles(makeStyles);
+
+  async function handleEmailSignIn() {
+    const em = email.trim().toLowerCase();
+    if (!em || !password) { Alert.alert('Sign in', 'Enter your email and password.'); return; }
+    setLoading(true);
+    try {
+      await signInWithEmailAndPassword(auth, em, password);
+    } catch (err) {
+      // One generic message — never confirm whether the account exists.
+      Alert.alert('Sign-in failed', 'Incorrect email or password.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSendOtp() {
+    const p = phone.trim();
+    if (p.replace(/\D/g, '').length < 10) { Alert.alert('Phone sign-in', 'Enter your mobile number.'); return; }
+    setLoading(true);
+    try {
+      const r = await requestPhoneOtp(p);
+      if (r?.ok) { setOtpSent(true); }
+      else { Alert.alert('Phone sign-in', "Couldn't send a code. Check the number and try again."); }
+    } catch (err) {
+      // resource-exhausted → throttled; anything else → generic.
+      const msg = /resource-exhausted|too many|wait/i.test(err?.message || '') ? err.message : "Couldn't send a code. Try again in a moment.";
+      Alert.alert('Phone sign-in', msg);
+    } finally { setLoading(false); }
+  }
+
+  async function handleVerifyOtp() {
+    const code = otpCode.replace(/\D/g, '');
+    if (code.length !== 6) { Alert.alert('Phone sign-in', 'Enter the 6-digit code.'); return; }
+    setLoading(true);
+    try {
+      const r = await verifyPhoneOtp(phone.trim(), code);
+      if (r?.ok && r.token) { await signInWithCustomToken(auth, r.token); }
+      else { Alert.alert('Phone sign-in', 'That code didn\'t work. Request a new one.'); }
+    } catch (err) {
+      // permission-denied carries a helpful message (attempts left / expired).
+      Alert.alert('Phone sign-in', err?.message?.replace(/^.*?:\s*/, '') || 'That code didn\'t work.');
+    } finally { setLoading(false); }
+  }
 
   async function handleGoogleSignIn() {
     if (isExpoGo) {
@@ -154,6 +212,100 @@ export default function AuthScreen() {
           />
         )}
 
+        {/* Email/password — for staff whose salon set up a password login
+            (no Google or Apple account required). Also the typed-credential
+            path App Review uses with the demo account. */}
+        {!showEmail ? (
+          <TouchableOpacity style={styles.emailLink} onPress={() => setShowEmail(true)} disabled={loading}>
+            <Text style={styles.emailLinkText}>Sign in with email</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.emailForm}>
+            <TextInput
+              style={styles.input}
+              placeholder="Email"
+              placeholderTextColor={styles._muted.color}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              textContentType="username"
+              autoComplete="email"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              placeholderTextColor={styles._muted.color}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              textContentType="password"
+              autoComplete="password"
+              onSubmitEditing={handleEmailSignIn}
+            />
+            <TouchableOpacity
+              style={[styles.emailBtn, loading && { opacity: 0.6 }]}
+              onPress={handleEmailSignIn}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.emailBtnText}>Sign in</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Phone sign-in — staff who linked their number in Profile. */}
+        {!showPhone ? (
+          <TouchableOpacity style={styles.emailLink} onPress={() => setShowPhone(true)} disabled={loading}>
+            <Text style={styles.emailLinkText}>Sign in with phone</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.emailForm}>
+            {!otpSent ? (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Mobile number"
+                  placeholderTextColor={styles._muted.color}
+                  value={phone}
+                  onChangeText={setPhone}
+                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
+                  autoComplete="tel"
+                  onSubmitEditing={handleSendOtp}
+                />
+                <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleSendOtp} disabled={loading} activeOpacity={0.85}>
+                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Send code</Text>}
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TextInput
+                  style={styles.input}
+                  placeholder="6-digit code"
+                  placeholderTextColor={styles._muted.color}
+                  value={otpCode}
+                  onChangeText={setOtpCode}
+                  keyboardType="number-pad"
+                  textContentType="oneTimeCode"
+                  autoComplete="sms-otp"
+                  maxLength={6}
+                  onSubmitEditing={handleVerifyOtp}
+                />
+                <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleVerifyOtp} disabled={loading} activeOpacity={0.85}>
+                  {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Verify & sign in</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={{ paddingVertical: 10, alignItems: 'center' }} onPress={() => { setOtpSent(false); setOtpCode(''); }} disabled={loading}>
+                  <Text style={styles._muted}>Use a different number</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
+
         {/* Dev-only escape hatch for testing UI inside Expo Go where
             the native Google SDK isn't available. Remove before App Store. */}
         {isExpoGo && (
@@ -191,6 +343,15 @@ const makeStyles = (t) => StyleSheet.create({
   googleBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dadce0', borderRadius: 12, paddingVertical: 13 },
   googleBtnText: { color: '#3c4043', fontSize: 15, fontWeight: '600' },
   appleBtn:  { width: '100%', height: 48, marginTop: 12 },
+  emailLink: { paddingVertical: 14, alignItems: 'center' },
+  emailLinkText: { color: t.textMuted, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  emailForm: { width: '100%', marginTop: 14, gap: 10 },
+  input:     { width: '100%', borderWidth: 1, borderColor: t.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, fontSize: 15, color: t.text, backgroundColor: t.surface },
+  emailBtn:  { width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: t.teal, borderRadius: 12, paddingVertical: 13 },
+  emailBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  // Placeholder color needs a resolved value, not a style — stashed here so
+  // the component can read it via styles._muted.color.
+  _muted:    { color: t.placeholder },
   devBtn:    { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 14, borderRadius: 12, borderWidth: 1, borderColor: t.border, borderStyle: 'dashed' },
   devBtnText:{ color: t.textMuted, fontSize: 12, fontWeight: '500', letterSpacing: 0.4 },
 });

@@ -48,7 +48,7 @@ const CrudRow = memo(function CrudRow({ item, styles, canEdit, dangerColor, titl
 
 export default function ManageCrud({
   load, create, save, remove, canEdit = false, blank, fields,
-  titleOf, subtitleOf, addLabel = 'Add', headerNote,
+  titleOf, subtitleOf, addLabel = 'Add', headerNote, headerAction,
 }) {
   const { contentMaxWidth } = useResponsive();
   const { theme } = useTheme();
@@ -120,7 +120,12 @@ export default function ManageCrud({
         keyExtractor={(it) => it.id}
         contentContainerStyle={{ padding: 14, paddingBottom: 90, maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={theme.green} />}
-        ListHeaderComponent={headerNote ? <Text style={styles.note}>{headerNote(items)}</Text> : null}
+        ListHeaderComponent={(headerAction || headerNote) ? (
+          <View>
+            {headerAction || null}
+            {headerNote ? <Text style={styles.note}>{headerNote(items)}</Text> : null}
+          </View>
+        ) : null}
         ListEmptyComponent={<Text style={styles.empty}>Nothing here yet.</Text>}
         renderItem={renderItem}
       />
@@ -164,24 +169,46 @@ export default function ManageCrud({
                         );
                       })}
                     </View>
-                  ) : f.type === 'multiselect' ? (
+                  ) : f.type === 'multiselect' ? (() => {
+                    const opts = f.options || [];
+                    const allVals = opts.map(o => (typeof o === 'string' ? o : o.value));
+                    const arr = Array.isArray(editing[f.key]) ? editing[f.key] : [];
+                    // emptyMeansAll: empty (or full) selection = "all" — every chip
+                    // shows ON and toggling normalizes back to [] at the extremes,
+                    // so there's never a "selected nothing" state (parity with the
+                    // web ServicesPicker). Falsy flag keeps the original behavior.
+                    const isAll = f.emptyMeansAll && (arr.length === 0 || arr.length >= allVals.length);
+                    const onSet = new Set(isAll ? allVals : arr);
+                    return (
                     <View style={styles.selectRow}>
-                      {(f.options || []).length === 0 && <Text style={styles.multiEmpty}>{f.emptyLabel || 'Nothing to choose from.'}</Text>}
-                      {(f.options || []).map(opt => {
+                      {opts.length === 0 && <Text style={styles.multiEmpty}>{f.emptyLabel || 'Nothing to choose from.'}</Text>}
+                      {f.emptyMeansAll && opts.length > 0 && (
+                        <Text style={styles.multiEmpty}>{isAll ? 'Performs all services — uncheck any this tech doesn’t do.' : `${onSet.size} of ${allVals.length} selected`}</Text>
+                      )}
+                      {opts.map(opt => {
                         const val = typeof opt === 'string' ? opt : opt.value;
                         const lbl = typeof opt === 'string' ? opt : opt.label;
-                        const arr = Array.isArray(editing[f.key]) ? editing[f.key] : [];
-                        const on = arr.includes(val);
+                        const on = f.emptyMeansAll ? onSet.has(val) : arr.includes(val);
                         return (
                           <TouchableOpacity key={val}
-                            onPress={() => setEditing({ ...editing, [f.key]: on ? arr.filter(x => x !== val) : [...arr, val] })}
+                            onPress={() => {
+                              if (f.emptyMeansAll) {
+                                const next = new Set(onSet);
+                                if (next.has(val)) next.delete(val); else next.add(val);
+                                const out = (next.size === 0 || next.size >= allVals.length) ? [] : allVals.filter(x => next.has(x));
+                                setEditing({ ...editing, [f.key]: out });
+                              } else {
+                                setEditing({ ...editing, [f.key]: on ? arr.filter(x => x !== val) : [...arr, val] });
+                              }
+                            }}
                             style={[styles.chip, on && styles.chipOn]}>
                             <Text style={[styles.chipText, on && styles.chipTextOn]}>{on ? '✓ ' : ''}{lbl}</Text>
                           </TouchableOpacity>
                         );
                       })}
                     </View>
-                  ) : f.type === 'custom' ? (
+                    );
+                  })() : f.type === 'custom' ? (
                     f.render(editing, setEditing)
                   ) : (
                     <TextInput

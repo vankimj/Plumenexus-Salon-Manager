@@ -158,7 +158,7 @@ export default function AttendanceAdmin() {
         </button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--pn-text-muted)' }}>
-          {sortedEmps.length} active employees · {dow}
+          {sortedEmps.length} active staff · {dow}
         </span>
       </div>
 
@@ -184,11 +184,11 @@ export default function AttendanceAdmin() {
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60, color: 'var(--pn-text-faint)' }}>Loading…</div>
       ) : sortedEmps.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 60, color: 'var(--pn-text-faint)' }}>No active employees.</div>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--pn-text-faint)' }}>No active staff.</div>
       ) : (
         <div style={{ background: 'var(--pn-surface)', border: '1px solid var(--pn-border)', borderRadius: 12, overflow: 'hidden' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1.4fr 1.4fr 1fr 1fr', padding: '10px 14px', fontSize: 11, fontWeight: 700, color: 'var(--pn-text-muted)', letterSpacing: '.05em', textTransform: 'uppercase', background: 'var(--pn-bg)', borderBottom: '1px solid var(--pn-border)' }}>
-            <div>Employee</div>
+            <div>Staff</div>
             <div>Scheduled</div>
             <div>Clock In</div>
             <div>Clock Out</div>
