@@ -8,6 +8,7 @@ import {
   buildReceiptsFromGg, clientKey,
   collectTechNames, missingTechNames,
 } from '../lib/csvImport';
+import StaffImportModal from '../modules/employees/StaffImportModal';
 
 const TYPE_LABELS = {
   clients:      'Clients',
@@ -45,6 +46,13 @@ export default function CsvImportSection({ onBusyChange }) {
   const lineItemsFileRef = useRef(null);
   const [lineItemsFile,   setLineItemsFile]   = useState(null);
   const [receiptsResult,  setReceiptsResult]  = useState(null);
+
+  // Staff import (from screenshots) — GG has no staff export, so this lives at
+  // the top of the migration hub. Loads existing staff names for dedup.
+  const [importStaff, setImportStaff] = useState(false);
+  const [staffList, setStaffList] = useState([]);
+  const reloadStaff = useCallback(() => { fetchEmployees().then(e => setStaffList(e || [])).catch(() => setStaffList([])); }, []);
+  useEffect(() => { reloadStaff(); }, [reloadStaff]);
 
   // Common
   const [running,  setRunning]  = useState(null); // 'clients' | 'receipts' | null
@@ -368,8 +376,32 @@ export default function CsvImportSection({ onBusyChange }) {
 
       <div style={{ padding: '14px 16px' }}>
         <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.55, marginBottom: 14 }}>
-          Three sequential imports — each unlocks the next. Export from <strong>GlossGenius → Insights → Reports</strong>. Records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
+          Three sequential CSV imports — each unlocks the next. Export from <strong>GlossGenius → Insights → Reports</strong>. Records get tagged <code style={{ background: 'var(--pn-warning-bg)', padding: '0 4px', borderRadius: 3 }}>_importedFrom: glossgenius</code>.
         </div>
+
+        {/* Staff (screenshots) — GG has no staff export. Do this FIRST so imported
+            sales in step 3 attribute to the right person. */}
+        <div style={{ border: '1px solid var(--pn-border)', borderRadius: 10, padding: 14, marginBottom: 14, background: 'var(--pn-bg)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 4 }}>👥 Staff — from screenshots</div>
+          <div style={{ fontSize: 12, color: 'var(--pn-text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
+            GlossGenius has no staff export, so import your team from screenshots of its staff list.
+            Do this <strong>first</strong> — then sales in step 3 attribute to the right person, and any tech
+            in your transactions who isn't on staff is auto-added as a disabled former staff member.
+          </div>
+          <button onClick={() => setImportStaff(true)} style={primaryBtn(false)}>📷 Import staff from screenshots</button>
+          {staffList.length > 0 && (
+            <span style={{ fontSize: 11, color: 'var(--pn-text-muted)', marginLeft: 10 }}>{staffList.length} staff on file</span>
+          )}
+        </div>
+
+        {importStaff && (
+          <StaffImportModal
+            existingNames={staffList.map(e => e.name)}
+            nextSortOrder={staffList.length}
+            onClose={() => setImportStaff(false)}
+            onCreated={() => { setImportStaff(false); reloadStaff(); }}
+          />
+        )}
 
         <Step
           num={1}
