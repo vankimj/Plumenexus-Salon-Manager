@@ -10,6 +10,7 @@ import { phSVG } from '../utils/helpers';
 import { isFeatureOn } from '../lib/featureFlags';
 import { resolveTerms } from '../data/verticals';
 import { unlockedCapsFor } from '../lib/planEntitlements';
+import { startUserPrefsSync, stopUserPrefsSync } from '../lib/userPrefsSync';
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -563,6 +564,15 @@ export function AppProvider({ children }) {
   }, []);
 
   const completeMagicLink = useCallback((email) => doCompleteMagicLink(email), []); // eslint-disable-line
+
+  // ── Cross-device UI prefs (favorites / collapsed sections / density) ──
+  // Mirrors localStorage prefs to tenants/{tid}/userPrefs/{uid} and applies
+  // remote changes live. Degrades to device-local on any Firestore denial.
+  useEffect(() => {
+    if (!gUser?.uid || portalClientId) { stopUserPrefsSync(); return; }
+    startUserPrefsSync(gUser.uid);
+    return stopUserPrefsSync;
+  }, [gUser?.uid, portalClientId]);
 
   // ── Chat unread badge ──────────────────────────────────
   useEffect(() => {
