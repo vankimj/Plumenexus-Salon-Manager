@@ -17,7 +17,9 @@
 import { useState, useEffect } from 'react';
 
 export const DENSITIES = ['simple', 'standard', 'everything'];
-export const DEFAULT_PREFS = { density: 'standard', homeExpanded: false };
+//   favorites:  module ids you've hearted → shown in a Favorites section up top
+//   collapsed:  { [sectionKey]: true } for home sections you've collapsed via the caret
+export const DEFAULT_PREFS = { density: 'standard', homeExpanded: false, favorites: [], collapsed: {} };
 
 const keyFor = (uid) => `pn:uiPrefs:${uid || 'anon'}`;
 
@@ -34,6 +36,8 @@ export function getUserPrefs(uid) {
     return {
       density:      DENSITIES.includes(p?.density) ? p.density : DEFAULT_PREFS.density,
       homeExpanded: !!p?.homeExpanded,
+      favorites:    Array.isArray(p?.favorites) ? p.favorites.filter(x => typeof x === 'string') : [],
+      collapsed:    (p?.collapsed && typeof p.collapsed === 'object' && !Array.isArray(p.collapsed)) ? p.collapsed : {},
     };
   } catch (_) {
     return { ...DEFAULT_PREFS };
