@@ -9,6 +9,7 @@ import { SEED_EMPLOYEES } from '../../data/seedEmployees';
 import { useApp } from '../../context/AppContext';
 import { logActivity, logError } from '../../lib/logger';
 import { subscribeLocations, isMultiLocation, activeLocations, DEFAULT_LOCATION_ID } from '../../lib/locations';
+import { ROLE_DESCRIPTIONS, normalizeRole, resolveRoleCaps, CAP_GROUPS } from '../../lib/rbac';
 import EmptyState from '../../components/EmptyState';
 import StaffImportModal from './StaffImportModal';
 
@@ -287,7 +288,7 @@ function EmployeeRow({ emp, totalServices, last, onView, onEdit, onDelete, onTog
 }
 
 function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, viewOnly = false, onSwitchToEdit, onReload }) {
-  const { showToast, users, grantAccess } = useApp();
+  const { showToast, users, grantAccess, customRoles } = useApp();
   const [tab,    setTab]    = useState('profile');
   const [saving, setSaving] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -322,7 +323,7 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
     showToast?.(next === 'view' ? `${emp.name} can now only view their schedule` : `${emp.name} can now edit their schedule`);
   }
   const TABS    = isAdmin
-    ? ['profile', 'contact', 'social', 'schedule', 'services', 'compensation']
+    ? ['profile', 'contact', 'social', 'schedule', 'services', 'compensation', 'permissions']
     : ['profile', 'contact', 'social', 'schedule', 'services'];
 
   function patchWorkDay(day, patch) {
@@ -713,6 +714,20 @@ function EmployeeModal({ emp, services, isAdmin, onChange, onSave, onClose, view
               ))}
             </>
           )}
+
+          {/* ── Permissions (admin-only tab) ── */}
+          {tab === 'permissions' && (
+            <PermissionsTab
+              emp={emp}
+              linkedUser={linkedUser}
+              customRoles={customRoles}
+              onSetRole={(role, label) => {
+                grantAccess(linkedUser.email, role, linkedUser.techName);
+                showToast(`${emp.name || linkedUser.email} is now ${label}`);
+              }}
+              onSetScheduleAccess={setScheduleAccess}
+            />
+          )}
         </fieldset>
 
         {/* Footer */}
@@ -993,5 +1008,87 @@ function TimeClockPinSection({ emp, onPinChanged, showToast }) {
         4 digits. The tech enters this at the iPad kiosk to clock in/out and start/end breaks.
       </div>
     </Field>
+  );
+}
+
+// ── Permissions tab ────────────────────────────────────────────────
+// Surfaces the ASSIGNED ROLE on the staff profile itself (canonically it lives
+// on the user record — Admin → Users edits the same fields via the same
+// grantAccess path, so the two surfaces can't drift). Shows what the role
+// grants (capability chips from the rbac matrix, custom-role aware).
+function PermissionsTab({ emp, linkedUser, customRoles, onSetRole, onSetScheduleAccess }) {
+  const capLabel = {};
+  CAP_GROUPS.forEach(g => g.caps.forEach(c => { capLabel[c.cap] = c.label; }));
+
+  if (!linkedUser) {
+    return (
+      <div style={{ fontSize: 13, color: 'var(--pn-text-muted)', lineHeight: 1.6, padding: '8px 2px' }}>
+        {emp.email
+          ? <>No login is linked to <strong>{emp.email}</strong> yet. Once they sign in and are granted access (Admin → Users), their role appears here.</>
+          : <>No login linked. Add this person's <strong>email on the Contact tab</strong> — when they sign in with it, their access and role show up here.</>}
+      </div>
+    );
+  }
+
+  const isPending  = linkedUser.role === 'pending';
+  const customRole = (customRoles?.roles || []).find(r => r.key === linkedUser.role) || null;
+  const roleOptions = [
+    { value: 'admin',     label: 'Owner' },
+    { value: 'manager',   label: 'Manager' },
+    { value: 'tech',      label: 'Staff (tech)' },
+    { value: 'scheduler', label: 'Front desk' },
+    { value: 'readonly',  label: 'View only' },
+  ];
+  const optionLabel = (v) => roleOptions.find(o => o.value === v)?.label
+    || (customRoles?.roles || []).find(r => r.key === v)?.label
+    || v;
+  const description = customRole
+    ? (customRole.description || `Custom role: ${customRole.label}`)
+    : (ROLE_DESCRIPTIONS[normalizeRole(linkedUser.role)] || 'No access.');
+  const caps = resolveRoleCaps(linkedUser.role, customRoles);
+
+  return (
+    <>
+      <Field label="🛡 Assigned role">
+        <select value={linkedUser.role} onChange={e => onSetRole(e.target.value, optionLabel(e.target.value))} style={inp}>
+          {isPending && <option value="pending" disabled>Pending approval — pick a role to approve</option>}
+          {roleOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {(customRoles?.roles || []).length > 0 && (
+            <optgroup label="Custom roles">
+              {customRoles.roles.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+            </optgroup>
+          )}
+          <option value="denied">Denied</option>
+        </select>
+        <div style={{ fontSize: 11.5, color: 'var(--pn-text-muted)', marginTop: 6, lineHeight: 1.5 }}>{description}</div>
+        <div style={{ fontSize: 11, color: 'var(--pn-text-faint)', marginTop: 4 }}>
+          Signs in as <strong>{linkedUser.email}</strong>. Also editable in Admin → Users — both edit the same record.
+        </div>
+      </Field>
+
+      {linkedUser.role === 'tech' && (
+        <Field label="📅 Schedule access">
+          <select value={linkedUser.scheduleAccess || 'edit'} onChange={e => onSetScheduleAccess(e.target.value)} style={inp}>
+            <option value="edit">Can edit their own schedule</option>
+            <option value="view">View only</option>
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--pn-text-faint)', marginTop: 4 }}>Enforced server-side, not just in the UI.</div>
+        </Field>
+      )}
+
+      <Field label="What this role can do">
+        {caps.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--pn-text-faint)', fontStyle: 'italic' }}>Nothing — no management access.</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {caps.map(c => (
+              <span key={c} style={{ fontSize: 11, padding: '3px 9px', borderRadius: 20, background: 'var(--pn-bg)', border: '1px solid var(--pn-border)', color: 'var(--pn-text-muted)' }}>
+                {capLabel[c] || c}
+              </span>
+            ))}
+          </div>
+        )}
+      </Field>
+    </>
   );
 }
