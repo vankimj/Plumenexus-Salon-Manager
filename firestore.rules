@@ -460,6 +460,14 @@ service cloud.firestore {
         allow write: if isTenantAdmin(tenantId);
       }
 
+      // Per-user UI prefs (favorites, collapsed home sections, density) —
+      // synced across devices by src/lib/userPrefsSync.js. Each signed-in
+      // staff member may read/write ONLY their own doc. Not sensitive data,
+      // but scoping to the owner keeps one user's taste out of another's UI.
+      match /userPrefs/{uid} {
+        allow read, write: if isTenantStaff(tenantId) && request.auth.uid == uid;
+      }
+
       // Clients: only this tenant's staff can read/write
       match /clients/{clientId} {
         allow read:  if isTenantStaff(tenantId);

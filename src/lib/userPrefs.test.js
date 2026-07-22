@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { getUserPrefs, setUserPrefs, DEFAULT_PREFS, DENSITIES } from './userPrefs';
+import { getUserPrefs, setUserPrefs, DEFAULT_PREFS, DENSITIES, newerOf } from './userPrefs';
 
 // Minimal in-memory localStorage for the node test env (no jsdom).
 beforeEach(() => {
@@ -40,5 +40,37 @@ describe('userPrefs', () => {
 
   it('exposes the three density levels', () => {
     expect(DENSITIES).toEqual(['simple', 'standard', 'everything']);
+  });
+
+  it('stamps updatedAt on every set (the cross-device reconcile key)', () => {
+    const out = setUserPrefs('u1', { favorites: ['schedule'] });
+    expect(out.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('preserves a caller-supplied updatedAt (cloud adoption must not re-stamp)', () => {
+    const out = setUserPrefs('u1', { favorites: ['schedule'], updatedAt: '2026-01-01T00:00:00.000Z' });
+    expect(out.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('sanitizes favorites and collapsed on read', () => {
+    setUserPrefs('u1', { favorites: ['schedule', 42, null], collapsed: { core: true } });
+    const p = getUserPrefs('u1');
+    expect(p.favorites).toEqual(['schedule']);
+    expect(p.collapsed).toEqual({ core: true });
+  });
+});
+
+describe('newerOf (cross-device reconcile)', () => {
+  it('local wins when there is no cloud copy', () => {
+    expect(newerOf({ updatedAt: '2026-01-02' }, null)).toBe('local');
+  });
+  it('cloud wins with a newer stamp; local with a newer stamp; equal when identical', () => {
+    expect(newerOf({ updatedAt: '2026-01-01' }, { updatedAt: '2026-01-02' })).toBe('cloud');
+    expect(newerOf({ updatedAt: '2026-01-03' }, { updatedAt: '2026-01-02' })).toBe('local');
+    expect(newerOf({ updatedAt: '2026-01-02' }, { updatedAt: '2026-01-02' })).toBe('equal');
+  });
+  it('a blank local stamp loses to any real cloud stamp (fresh device adopts profile)', () => {
+    expect(newerOf({ updatedAt: '' }, { updatedAt: '2026-01-01' })).toBe('cloud');
+    expect(newerOf({}, { updatedAt: '2026-01-01' })).toBe('cloud');
   });
 });
