@@ -9,7 +9,7 @@ import HeroMerakiSite from './HeroMerakiSite';
 import { MODULE_ICONS, IconLightbulb, IconChair, IconChevronRight, IconArrowUpRight, IconSettings, IconMessage } from './Icons';
 import PreviewAsSelect, { previewLabel as sharedPreviewLabel } from './PreviewAsSelect';
 import { MODULES, getVisibleModules, getGroupedModules, effectivePlan, isModuleAvailableForPlan } from '../lib/modules';
-import { fetchWebfrontConfig, fetchEmployees } from '../lib/firestore';
+import { fetchWebfrontConfig } from '../lib/firestore';
 import { useUserPrefs } from '../lib/userPrefs';
 import { isManagementRole } from '../lib/rbac';
 
@@ -42,27 +42,6 @@ export default function HomeScreen({ onNavigate, onAdmin }) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [webCfg,       setWebCfg]       = useState(null);
   const [prefs, setPrefs] = useUserPrefs(gUser?.uid); // per-user density / home-expansion
-  // Decide whether to show the one-click "My tech view" button. Two
-  // independent signals — either is sufficient:
-  //   1. The admin's user record has a `techName` set explicitly (Admin →
-  //      Users → "Also a tech?" picker). Preserved across role changes by
-  //      AppContext.grantAccess.
-  //   2. The admin's email matches an active employee's email (auto-detect
-  //      for tenants where the owner forgot the manual link).
-  const myUserRec = users.find(u => (u.email || '').toLowerCase() === (gUser?.email || '').toLowerCase());
-  const techNameFromUserRec = myUserRec?.techName || null;
-  const [techNameFromEmployee, setTechNameFromEmployee] = useState(null);
-  useEffect(() => {
-    if (!gUser?.email || !realIsAdmin || techNameFromUserRec) {
-      setTechNameFromEmployee(null);
-      return;
-    }
-    fetchEmployees().then(emps => {
-      const me = emps.find(e => (e.email || '').toLowerCase() === gUser.email.toLowerCase() && (e.active !== false));
-      setTechNameFromEmployee(me?.name || null);
-    }).catch(() => setTechNameFromEmployee(null));
-  }, [gUser?.email, realIsAdmin, techNameFromUserRec]);
-  const myTechEmpName = techNameFromUserRec || techNameFromEmployee;
   const canManage = isAdmin || isReadOnly || isManagementRole(rawRole, customRoles);
   const plan = effectivePlan(settings);
 
@@ -130,13 +109,6 @@ export default function HomeScreen({ onNavigate, onAdmin }) {
             <button onClick={() => setViewAs(null)} title={`Exit preview: ${previewLabel(viewAs)}`}
               style={{ height: 40, borderRadius: 20, border: 'none', background: '#f59e0b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', fontSize: 13, fontWeight: 700, color: '#fff', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(0,0,0,.2)' }}>
               ← Exit <span className="ms-impersonate-name">{previewLabel(viewAs)}</span>
-            </button>
-          )}
-          {realIsAdmin && !viewAs && myTechEmpName && (
-            <button onClick={() => setViewAs({ role: 'tech', techName: myTechEmpName })}
-              title={`See your day as ${myTechEmpName}`} className="ms-action-btn"
-              style={{ height: 40, borderRadius: 20, border: '1px solid #6a4fa0', background: 'var(--pn-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px', fontSize: 13, fontWeight: 700, color: '#6a4fa0', fontFamily: 'inherit' }}>
-              👩‍💼 <span className="ms-action-label">My tech view</span>
             </button>
           )}
           <PreviewAsSelect />
