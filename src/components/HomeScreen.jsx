@@ -247,8 +247,9 @@ export default function HomeScreen({ onNavigate, onAdmin }) {
             <CuratedManageGrid
               settings={settings} role={rawRole} customRoles={customRoles} isAdmin={isAdmin} hasFeature={hasFeature}
               navigate={navigate} totalChatUnread={totalChatUnread}
-              density={prefs.density} homeExpanded={prefs.homeExpanded}
-              onToggleExpanded={(v) => setPrefs({ homeExpanded: v })}
+              favorites={prefs.favorites} collapsed={prefs.collapsed}
+              onToggleFavorite={(id) => setPrefs({ favorites: (prefs.favorites || []).includes(id) ? prefs.favorites.filter(x => x !== id) : [...(prefs.favorites || []), id] })}
+              onToggleSection={(key) => setPrefs({ collapsed: { ...(prefs.collapsed || {}), [key]: !(prefs.collapsed || {})[key] } })}
             />
           ) : (
             <>
@@ -305,47 +306,50 @@ function SectionLabel({ children }) {
   );
 }
 
-// Curated home grid: Core tiles always shown; Grow + Admin tucked behind a
-// "Show more" toggle (per-user `homeExpanded` remembers the choice). Density
-// 'everything' expands all groups; 'simple'/'standard' collapse the advanced
-// ones. Gated by the `curatedHome` feature flag so it ships dark.
-function CuratedManageGrid({ settings, role, customRoles, isAdmin, hasFeature, navigate, totalChatUnread, density, homeExpanded, onToggleExpanded }) {
-  const groups   = getGroupedModules(settings, { role, customRoles, isAdmin, hiddenTiles: settings?.hiddenTiles, hasFeature });
-  const showAll  = density === 'everything';
-  const [expanded, setExpanded] = useState(density === 'simple' ? false : !!homeExpanded);
-  const advanced = [...groups.grow, ...groups.admin];
+// A section header whose caret collapses/expands its tiles. Collapsed state
+// persists per-user (userPrefs.collapsed).
+function CollapsibleSection({ label, collapsed, onToggle, children }) {
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', padding: '2px 2px', marginBottom: collapsed ? 6 : 12, cursor: 'pointer', fontFamily: 'inherit' }}
+      >
+        <span style={{ fontSize: 10, color: 'var(--pn-text-faint)', display: 'inline-block', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>▼</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--pn-text-faint)', letterSpacing: '.1em', textTransform: 'uppercase' }}>{label}</span>
+      </button>
+      {!collapsed && children}
+    </div>
+  );
+}
+
+// Curated home grid: sections each collapse via a caret; Favorites holds the
+// tiles you've hearted. Section order per product spec: Favorites → Core →
+// Admin → Grow. Gated by the `curatedHome` feature flag.
+function CuratedManageGrid({ settings, role, customRoles, isAdmin, hasFeature, navigate, totalChatUnread, favorites, collapsed, onToggleFavorite, onToggleSection }) {
+  const groups = getGroupedModules(settings, { role, customRoles, isAdmin, hiddenTiles: settings?.hiddenTiles, hasFeature });
+  const favSet = new Set(favorites || []);
+  const favTiles = [...groups.core, ...groups.grow, ...groups.admin].filter(m => favSet.has(m.id));
 
   const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginBottom: 16 };
-  const tile = (m) => <ModuleTile key={m.id} {...m} onClick={() => navigate(m.id)} badge={m.id === 'chat' ? totalChatUnread : 0} />;
-  const moreBtn = {
-    display: 'block', margin: '0 auto 16px', background: 'var(--pn-surface)',
-    border: '1px solid var(--pn-border)', borderRadius: 12, padding: '9px 18px',
-    cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: 'var(--pn-text-muted)',
-  };
-  const advancedSections = (
-    <>
-      {groups.grow.length  > 0 && (<><SectionLabel>Grow</SectionLabel><div style={grid}>{groups.grow.map(tile)}</div></>)}
-      {groups.admin.length > 0 && (<><SectionLabel>Admin</SectionLabel><div style={grid}>{groups.admin.map(tile)}</div></>)}
-    </>
+  const tile = (m) => (
+    <ModuleTile key={m.id} {...m} onClick={() => navigate(m.id)}
+      badge={m.id === 'chat' ? totalChatUnread : 0}
+      favorited={favSet.has(m.id)} onToggleFavorite={onToggleFavorite} />
   );
+  const section = (key, label, tiles) => tiles.length > 0 ? (
+    <CollapsibleSection key={key} label={label} collapsed={!!(collapsed && collapsed[key])} onToggle={() => onToggleSection(key)}>
+      <div style={grid}>{tiles.map(tile)}</div>
+    </CollapsibleSection>
+  ) : null;
 
   return (
     <>
-      <SectionLabel>Core</SectionLabel>
-      <div style={grid}>{groups.core.map(tile)}</div>
-
-      {advanced.length > 0 && (
-        showAll ? advancedSections : (expanded ? (
-          <>
-            {advancedSections}
-            <button onClick={() => { setExpanded(false); onToggleExpanded?.(false); }} style={moreBtn}>Show less ▴</button>
-          </>
-        ) : (
-          <button onClick={() => { setExpanded(true); onToggleExpanded?.(true); }} style={moreBtn}>
-            Show {advanced.length} more {advanced.length === 1 ? 'tool' : 'tools'} ▾
-          </button>
-        ))
-      )}
+      {section('favorites', 'Favorites', favTiles)}
+      {section('core', 'Core', groups.core)}
+      {section('admin', 'Admin', groups.admin)}
+      {section('grow', 'Grow', groups.grow)}
     </>
   );
 }
@@ -674,7 +678,7 @@ function HeroPhotoSplit(props) {
   );
 }
 
-function ModuleTile({ id, label, desc, onClick, badge, locked }) {
+function ModuleTile({ id, label, desc, onClick, badge, locked, favorited, onToggleFavorite }) {
   const [hover, setHover] = useState(false);
   const Icon = MODULE_ICONS[id];
   return (
@@ -694,6 +698,29 @@ function ModuleTile({ id, label, desc, onClick, badge, locked }) {
     >
       {locked && (
         <div style={{ position: 'absolute', top: 10, right: 10, background: 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff', fontSize: 9, fontWeight: 800, padding: '3px 8px', borderRadius: 20, letterSpacing: '.06em', boxShadow: '0 2px 6px rgba(124,58,237,.3)' }}>PRO</div>
+      )}
+      {onToggleFavorite && !locked && (
+        // A span (not a nested <button>) that stops propagation so hearting a
+        // tile never triggers its navigation. Always visible (touch-friendly):
+        // faint outline when not a favorite, filled red when it is.
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
+          title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+          onClick={(e) => { e.stopPropagation(); onToggleFavorite(id); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggleFavorite(id); } }}
+          style={{
+            position: 'absolute', top: 8, right: 8, width: 26, height: 26, borderRadius: 8,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+            fontSize: 15, lineHeight: 1, userSelect: 'none',
+            color: favorited ? '#ef4444' : 'var(--pn-text-faint)',
+            opacity: favorited ? 1 : (hover ? 0.85 : 0.4),
+            transition: 'opacity .15s, color .15s, transform .12s',
+          }}
+        >
+          {favorited ? '♥' : '♡'}
+        </span>
       )}
       <div style={{ position: 'relative', width: 44, height: 44, borderRadius: 12, background: locked ? 'var(--pn-surface-alt)' : 'var(--tm-grad)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: locked ? 'none' : '0 4px 10px rgba(45,122,95,.18)', color: locked ? 'var(--pn-text-faint)' : '#fff' }}>
         {Icon ? <Icon size={22} /> : <span style={{ fontSize: 22 }}>◆</span>}
