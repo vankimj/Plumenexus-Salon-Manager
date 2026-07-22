@@ -7,6 +7,7 @@ import TicketPanel from './TicketPanel';
 import SupportTicketsButton from './SupportTicketsButton';
 import { MODULE_ICONS, IconHome, IconSettings, IconMessage } from './Icons';
 import LocationSwitcher from './LocationSwitcher';
+import PreviewAsSelect, { previewLabel as sharedPreviewLabel } from './PreviewAsSelect';
 import { MODULES, getVisibleModules, isModuleAvailableForPlan, effectivePlan } from '../lib/modules';
 import { isManagementRole } from '../lib/rbac';
 
@@ -36,30 +37,9 @@ export default function ModuleShell({ view, title, onHome, onAdmin, onNavigate, 
     }
     return [];
   })();
-  const techUsers = users.filter(u => u.role === 'tech' && u.techName);
-
-  function previewLabel(va) {
-    if (!va) return '';
-    if (va.role === 'tech') return va.techName;
-    if (va.role === 'scheduler') return 'Front desk';
-    if (va.role === 'manager') return 'Manager';
-    if (va.role === 'kiosk') return 'Kiosk';
-    if (String(va.role || '').startsWith('custom_')) {
-      return (customRoles?.roles || []).find(r => r.key === va.role)?.label || 'Custom role';
-    }
-    return 'View only';
-  }
-
-  function parsePreview(val) {
-    if (!val) return null;
-    if (val === 'scheduler') return { role: 'scheduler' };
-    if (val === 'readonly') return { role: 'readonly' };
-    if (val === 'manager') return { role: 'manager' };
-    if (val === 'kiosk') return { role: 'kiosk' };
-    if (val.startsWith('tech:')) return { role: 'tech', techName: val.slice(5) };
-    if (val.startsWith('custom:')) return { role: val.slice(7) };
-    return null;
-  }
+  // Picker + label logic live in PreviewAsSelect (shared with HomeScreen) so
+  // the role list can't drift between the two headers.
+  const previewLabel = (va) => sharedPreviewLabel(va, customRoles);
   const [showFeedback, setShowFeedback] = useState(false);
   const syncColor = { syncing: '#f59e0b', ok: '#22c55e', err: '#ef4444', idle: '#ddd' }[syncState] || '#ddd';
   const ModuleIcon = MODULE_ICONS[view];
@@ -187,23 +167,7 @@ export default function ModuleShell({ view, title, onHome, onAdmin, onNavigate, 
               <IconSettings size={16} /> <span className="ms-action-label">Admin</span>
             </button>
           )}
-          {realIsAdmin && !viewAs && (
-            <select value="" onChange={e => { const v = parsePreview(e.target.value); if (v) setViewAs(v); }}
-              className="ms-preview-select"
-              style={{ height: 40, borderRadius: 20, border: '1px solid var(--pn-border)', background: 'var(--pn-bg)', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--pn-text-muted)', fontFamily: 'inherit', padding: '0 12px', outline: 'none' }}>
-              <option value="">👤 Preview as…</option>
-              <option value="manager">🧑‍💼 Manager</option>
-              {techUsers.map(u => (
-                <option key={u.email} value={`tech:${u.techName}`}>👩‍💼 {u.techName}</option>
-              ))}
-              <option value="scheduler">📅 Scheduler</option>
-              <option value="readonly">👁 Read-only</option>
-              <option value="kiosk">🔒 Kiosk</option>
-              {(customRoles?.roles || []).map(r => (
-                <option key={r.key} value={`custom:${r.key}`}>⭐ {r.label}</option>
-              ))}
-            </select>
-          )}
+          <PreviewAsSelect />
           <button onClick={() => setShowFeedback(true)} title="Report a bug or idea" className="ms-action-btn"
             style={{ height: 40, borderRadius: 20, border: 'none', background: 'var(--tm-accent, #3D95CE)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', fontSize: 13, fontWeight: 700, color: '#fff', fontFamily: 'inherit', boxShadow: '0 2px 8px rgba(0,0,0,.2)' }}>
             <IconMessage size={16} /> <span className="ms-action-label">Feedback</span>
