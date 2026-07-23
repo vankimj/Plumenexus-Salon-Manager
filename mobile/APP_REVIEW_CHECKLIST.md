@@ -28,7 +28,7 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 
 | # | Item | Status | Evidence |
 |---|------|--------|----------|
-| 10 | Account deletion reachable (5.1.1(v)) | ✅ VALIDATED (server) / 🔶 spot-check UI on device | `deleteMyAccount` CF deployed + ACTIVE (updateTime 2026-07-11, gcloud describe). UI entry in ProfileScreen (comment cites 5.1.1(v)). |
+| 10 | Account deletion reachable (5.1.1(v)) | ✅ VALIDATED | `deleteMyAccount` CF deployed + ACTIVE (gcloud describe, 2026-07-11). UI path driven on the sim build: Profile → scroll → "Delete account" visible (Maestro, all steps green, 2026-07-23). |
 | 11 | Unit suite green on the fix branch | ✅ VALIDATED | 7 files / 55 tests pass (includes the new gate decision table). |
 | 12 | App boots on the review device class | ✅ VALIDATED | Release build compiled for and launched on the **iPad Air 11-inch (M4)** simulator (flows 1–2 run there). |
 | 13 | Google sign-in client id correct for `com.plumenexus.salon` | ✅ VALIDATED | Main's AuthScreen carries the new iOS OAuth client; the stale branch with the retired client was NOT used as the base. |
@@ -39,3 +39,19 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 - [ ] Reply drafted in ASC to both guideline items: 2.1(a) — fresh accounts now land on an access screen; demo creds path re-verified. 2.5.4 — background mode removed.
 - [ ] Build number bumped by EAS remote versioning (automatic) — verify in the build page before submitting.
 - [ ] Review notes updated: demo account + note that staff accounts are provisioned by a salon admin.
+
+## Additional sweeps (validated 2026-07-23)
+
+| # | Item | Status | Evidence |
+|---|------|--------|----------|
+| 14 | Auth persists across relaunch | ✅ VALIDATED | Sign in → `simctl terminate` → relaunch → straight back to "Dashboard — Demo Studio", signed in. (An earlier apparent failure was a test-side confound: a mid-experiment password rotation revoked the session — correct Firebase behavior.) Also proves the persisted-tenant instant-pass path on the real build. |
+| 15 | All permission purpose strings present + honest | ✅ VALIDATED | Photo/Camera/Bluetooth×2/Location/Microphone/LocalNetwork all in the generated Info.plist with specific, truthful copy (PlistBuddy). |
+| 16 | ATS secure | ✅ VALIDATED | `NSAllowsArbitraryLoads=false`; only `NSAllowsLocalNetworking=true` (card readers — matching usage string). |
+| 17 | Export compliance | ✅ VALIDATED | `ITSAppUsesNonExemptEncryption=false` in Info.plist — no ASC crypto questionnaire. |
+| 18 | iPad orientations | ✅ VALIDATED | All four orientations declared (no iPad-multitasking rejection surface). |
+| 19 | Push entitlement | ✅ VALIDATED | `aps-environment` present (development in local builds; EAS flips to production at archive). |
+| 20 | Privacy/Terms URLs live | ✅ VALIDATED | plumenexus.com/privacy + /terms both HTTP 200. |
+| 21 | No-IAP rationale (3.1.1) | ✅ DOCUMENTED | All payments are for real-world salon services/goods (Stripe) — outside IAP per 3.1.3(e)/physical-goods carve-out. No digital content is sold. |
+| 22 | SIWA button prominence (4.8) | ✅ VALIDATED | Boot screenshot: Apple button equal width/position directly below Google. |
+
+**ASC-side items (human, in App Store Connect):** privacy nutrition labels accuracy, age rating, screenshots, review notes text — not inspectable from the repo.
