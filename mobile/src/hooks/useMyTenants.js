@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, callFn } from '../lib/firebase';
 import { getCurrentTenant, setCurrentTenant } from '../lib/currentTenant';
@@ -12,19 +12,23 @@ import { dedupe } from '../lib/inflight';
 // can't read.
 //
 // Returns:
-//   { tenants, loading, error, current, switchTo(id) }
+//   { tenants, loading, error, current, switchTo(id), reload() }
 //
 // `current` is the live tenant ID — re-read from getCurrentTenant() so
-// callers re-render after switchTo() lands.
+// callers re-render after switchTo() lands. `reload()` re-asks the server
+// (bypassing the in-flight dedupe) — used by TenantGate's "Check again"
+// after an admin grants access.
 export default function useMyTenants() {
   const [tenants,   setTenants]   = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
   const [current,   setCurrent]   = useState(getCurrentTenant());
+  const reloadRef = useRef(() => {});
 
   useEffect(() => {
     let cancelled = false;
-    const unsub = onAuthStateChanged(auth, async (user) => {
+
+    async function check(user, { fresh = false } = {}) {
       if (cancelled) return;
       if (!user) {
         setTenants([]);
@@ -34,7 +38,10 @@ export default function useMyTenants() {
       setLoading(true);
       setError(null);
       try {
-        const res = await dedupe(`tenants:${(user.email || user.uid || '').toLowerCase()}`, () => callFn('getMyTenants')({}));
+        // `fresh` (TenantGate's "Check again") varies the dedupe key so a
+        // retry genuinely re-asks the server instead of joining a stale call.
+        const key = `tenants:${(user.email || user.uid || '').toLowerCase()}${fresh ? `:retry-${Math.floor(performance.now?.() ?? 0)}-${Math.trunc(Math.random() * 1e9)}` : ''}`;
+        const res = await dedupe(key, () => callFn('getMyTenants')({}));
         if (cancelled) return;
         const list = res?.data?.tenants || [];
         setTenants(list);
@@ -56,9 +63,14 @@ export default function useMyTenants() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    });
+    }
+
+    const unsub = onAuthStateChanged(auth, (user) => check(user));
+    reloadRef.current = (opts) => check(auth.currentUser, { fresh: true, ...opts });
     return () => { cancelled = true; unsub(); };
   }, []);
+
+  const reload = useCallback(() => reloadRef.current(), []);
 
   async function switchTo(tenantId) {
     if (!tenantId || tenantId === getCurrentTenant()) return;
@@ -66,5 +78,5 @@ export default function useMyTenants() {
     setCurrent(tenantId);
   }
 
-  return { tenants, loading, error, current, switchTo };
+  return { tenants, loading, error, current, switchTo, reload };
 }

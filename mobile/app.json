@@ -72,7 +72,7 @@
       [
         "@stripe/stripe-terminal-react-native",
         {
-          "bluetoothBackgroundMode": true,
+          "bluetoothBackgroundMode": false,
           "locationWhenInUsePermission": "Location is used to accept in-person card payments.",
           "bluetoothPeripheralPermission": "Bluetooth is used to connect to a card reader.",
           "bluetoothAlwaysUsagePermission": "Bluetooth is used to connect to a card reader."

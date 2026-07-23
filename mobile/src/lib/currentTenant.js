@@ -17,6 +17,10 @@ const FALLBACK = 'merakinailstudio';   // default tenant if storage is empty
 
 let current = FALLBACK;
 let loaded = false;
+// Provenance: true only when the selection came from storage or an explicit
+// pick — i.e. NOT the blind fallback. TenantGate uses this to let existing
+// users pass instantly while fresh installs wait on the membership answer.
+let fromStorage = false;
 const subscribers = new Set();
 
 // Call once at app startup BEFORE any Firestore queries fire. Reads the
@@ -26,7 +30,7 @@ export async function loadInitialTenant() {
   if (loaded) return current;
   try {
     const stored = await AsyncStorage.getItem(STORAGE_KEY);
-    if (stored) current = stored;
+    if (stored) { current = stored; fromStorage = true; }
   } catch (_) { /* AsyncStorage failed — stay on fallback */ }
   loaded = true;
   return current;
@@ -34,8 +38,13 @@ export async function loadInitialTenant() {
 
 export function getCurrentTenant() { return current; }
 
+// True when the current tenant is a real prior selection (persisted or picked
+// this session), not the fallback default a fresh install boots with.
+export function hasStoredTenant() { return fromStorage; }
+
 export async function setCurrentTenant(id) {
   if (!id || typeof id !== 'string') return;
+  fromStorage = true;   // an explicit selection counts even if id === current
   if (id === current) return;
   current = id;
   try { await AsyncStorage.setItem(STORAGE_KEY, id); } catch (_) {}
@@ -55,6 +64,7 @@ export function subscribeTenant(cb) {
 export async function clearCurrentTenant() {
   current = FALLBACK;
   loaded = false;
+  fromStorage = false;
   try { await AsyncStorage.removeItem(STORAGE_KEY); } catch (_) {}
   subscribers.forEach(cb => { try { cb(FALLBACK); } catch (_) {} });
 }
