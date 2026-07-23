@@ -14,6 +14,7 @@ import TerminalProvider from './src/components/TerminalProvider';
 import ErrorBoundary from './src/components/ErrorBoundary';
 import KioskLockGate from './src/components/KioskLockGate';
 import KioskRoot from './src/navigation/KioskRoot';
+import TenantGate from './src/components/TenantGate';
 import { loadInitialKioskLock, isKioskLocked, subscribeKioskLock } from './src/lib/kioskLock';
 import { ThemeProvider } from './src/theme/ThemeContext';
 
@@ -108,7 +109,12 @@ export default function App() {
               ? (kioskClaim
                   ? <TerminalProvider><KioskRoot /></TerminalProvider>   // dedicated kiosk: claim-driven, never the PIN gate
                   : kioskLocked ? <KioskLockGate />
-                  : <TerminalProvider><RootNav /></TerminalProvider>)
+                  // Membership gate: fresh sign-ins (e.g. Sign in with Apple)
+                  // must resolve to a salon before the app mounts — no more
+                  // hollow fallback-tenant shell (App Review 2.1a, 2026-07-23).
+                  // TerminalProvider stays inside so Stripe Terminal never
+                  // initializes for a pending user.
+                  : <TenantGate user={user}><TerminalProvider><RootNav /></TerminalProvider></TenantGate>)
               : <AuthScreen />}
           </ErrorBoundary>
         </View>
