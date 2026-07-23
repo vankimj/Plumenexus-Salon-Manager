@@ -14,7 +14,7 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 | 3 | Demo (reviewer) credentials are typeable in the app | ✅ VALIDATED | Email/password form exists on AuthScreen (`signInWithEmailAndPassword`, shipped in #512) — flow 2 types credentials end-to-end on the sim. |
 | 4 | Demo account signs in by password + lands in a working app | ✅ VALIDATED (proxy) | `app-review-demo` (appreview@plumenexus.test): password provider, not disabled, emailVerified, member of `tenants/demo` **adminEmails + staffEmails** (admin-SDK read, 2026-07-23). Maestro flow 2 signs in an identically-shaped demo admin and reaches the app (screenshot `shot-3-demo-admin`). |
 | 5 | The password in the ASC review notes matches the account | 🔶 HUMAN-REQUIRED | Cannot be read back from Firebase. **Jonathan:** confirm the password in App Store Connect → App Review Information, or ask to rotate it and update the notes. |
-| 6 | Sign in with Apple native sheet completes on a physical device | 🔶 HUMAN-REQUIRED | The Apple sheet requires a real device + real Apple ID. **Jonathan:** on a device build, sign in with a fresh Apple ID (Hide My Email on) → expect the Access-pending screen; that is the correct, functional outcome for an unlinked account. The Firebase side is validated (provider enabled with Services ID `app.plumenexus.signin`; `com.plumenexus.salon` registered in the project — Identity Toolkit + `apps:list`, 2026-07-23). |
+| 6 | Sign in with Apple native sheet completes on a physical device | ❌ **FAILED on device (2026-07-23)** — root-cause found | Jonathan's walkthrough: sheet errors "Sign Up Not Completed" **before app code runs** — same failure the reviewer hit. Evidence gathered after: the rejected build-6 IPA **is** signed with the SIWA entitlement (codesign read), signed by team **WX8JJUUYSR**; but the Firebase Apple provider is configured with team **7768658CR9** + Services ID `app.plumenexus.signin` (old JVK-era config, never migrated). Portal state of the NEW team's App ID is **not machine-checkable** (no ASC API key on this machine). See "Correction & re-grade" below. |
 
 ## Guideline 2.5.4 — bluetooth-central
 
@@ -55,3 +55,26 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 | 22 | SIWA button prominence (4.8) | ✅ VALIDATED | Boot screenshot: Apple button equal width/position directly below Google. |
 
 **ASC-side items (human, in App Store Connect):** privacy nutrition labels accuracy, age rating, screenshots, review notes text — not inspectable from the repo.
+
+## Correction & re-grade (2026-07-23, after the device walkthrough failed)
+
+An earlier revision said "the Firebase side is validated." That was an **overclaim**: what had been verified was *existence/enablement* (provider on, bundle registered), not *correctness*. The signing-team ↔ provider-team mismatch was visible in the very config quoted and was only caught after the on-device failure. Checklist grades now use explicit levels:
+
+- **L1 exists/enabled** — a thing is present/on
+- **L2 consistent** — identities match across the whole chain
+- **L3 exercised** — the real flow ran end-to-end on the real artifact
+
+| SIWA chain link | Level | Finding |
+|---|---|---|
+| SIWA entitlement in the SHIPPED binary | **L3** | Present in build-6 IPA (codesign), team `WX8JJUUYSR` |
+| Firebase Apple provider enabled | L1 | Enabled (Identity Toolkit read) |
+| Provider config CONSISTENT with signing team | **❌ L2 FAIL** | Provider: team `7768658CR9`, key `Q8C4H35XLG`, Services ID `app.plumenexus.signin` (old team) vs app signed by `WX8JJUUYSR` |
+| Services ID validity at Apple | L2 | Live client (authorize-endpoint probe) — but bound to the old team |
+| New team's App ID SIWA capability state | **UNVERIFIABLE from machine** | No ASC API key locally. HUMAN: portal check (Identifiers → com.plumenexus.salon → Sign In with Apple → Configure/Save), or create an ASC API key so this becomes machine-checkable permanently |
+| Native sheet completes on device | **❌ L3 FAIL** | "Sign Up Not Completed" (Jonathan + reviewer) |
+
+**New hard blockers before rebuild/resubmit:**
+1. (HUMAN) Portal, team WX8JJUUYSR: App ID `com.plumenexus.salon` → Sign In with Apple → Configure/Save as primary; create a SIWA key (.p8 + Key ID) under this team.
+2. (CLAUDE, after #1) Re-point the Firebase Apple provider to the new team/key via the Identity Toolkit admin API.
+3. (HUMAN) Re-run the device sheet test on build 6 — must complete into the app (then show the access-pending screen from this PR's fix).
+4. (Optional, recommended) Create an App Store Connect API key so App ID capability state is machine-verifiable in every future submission check.
