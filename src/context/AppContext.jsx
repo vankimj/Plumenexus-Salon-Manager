@@ -2,9 +2,9 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, us
 import { getTheme, detectAutoTheme } from '../lib/themes';
 import { normalizeRole, roleCan, roleExists } from '../lib/rbac';
 import { subscribeCustomRoles } from '../lib/customRoles';
-import { onAuthStateChanged, GoogleAuthProvider, OAuthProvider, signInWithPopup, signOut as fbSignOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
+import { onAuthStateChanged, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithCustomToken, signOut as fbSignOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
-import { loadAll, saveSlides, saveUsers, saveSettings, submitAccessRequest, fetchAccessRequests, deleteAccessRequest, fetchHandbook, fetchMyHandbookSig, signHandbookDoc, fetchClientByEmail, subscribeToChats, subscribeToRecentNotifications, markNotificationRead, ensureStaffEmailsBackfill, healUsersFullIfMissing } from '../lib/firestore';
+import { loadAll, saveSlides, saveUsers, saveSettings, submitAccessRequest, fetchAccessRequests, deleteAccessRequest, fetchHandbook, fetchMyHandbookSig, signHandbookDoc, fetchClientByEmail, subscribeToChats, subscribeToRecentNotifications, markNotificationRead, ensureStaffEmailsBackfill, healUsersFullIfMissing, verifyPhoneOtp } from '../lib/firestore';
 import { logActivity, setLoggerUser } from '../lib/logger';
 import { phSVG } from '../utils/helpers';
 import { isFeatureOn } from '../lib/featureFlags';
@@ -337,6 +337,17 @@ export function AppProvider({ children }) {
         }
       } catch (_) {}
 
+      // Apple "Hide My Email" relay with no staff/client match: this is almost
+      // always an EXISTING person whose account lives under their real email —
+      // signing up the relay address would permanently fork their identity
+      // (relay ≠ real email, so one-account-per-email can't link them). Delete
+      // the just-created orphan (allowed on a fresh sign-in) and steer them to
+      // the unified-account path instead of filing a junk access request.
+      if ((user.email || '').endsWith('@privaterelay.appleid.com')) {
+        try { await user.delete(); } catch (_) { await fbSignOut(auth); }
+        return { ok: false, reason: 'You hid your email, so we can\'t match you to your account. Sign in with Google, email, or phone — then add Apple from your profile menu, and Apple sign-in will work from then on (hidden email and all).' };
+      }
+
       // Write to requests collection (any authenticated user can write their own)
       try {
         await submitAccessRequest(user.uid, {
@@ -626,8 +637,31 @@ export function AppProvider({ children }) {
       const result = await signInWithPopup(auth, provider);
       return await checkUserAccess(result.user);
     } catch (e) {
+      // One-account-per-email collision: this Apple ID's email already signs in
+      // with another provider (usually Google). Email-enumeration protection
+      // hides which one, so point at the unified-account path instead of
+      // dumping the raw Firebase error.
+      if (e.code === 'auth/account-exists-with-different-credential') {
+        const em = e.customData?.email;
+        return { ok: false, reason: `${em ? em + ' already' : 'This email already'} signs in another way. Use your original sign-in method (e.g. Google), then add Apple from your profile menu.` };
+      }
       if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') return { ok: false, reason: 'Sign-in failed: ' + e.message };
       return { ok: false, reason: '' };
+    }
+  }, []); // eslint-disable-line
+
+  // Staff phone sign-in — the same custom SMS-OTP flow the mobile app uses.
+  // verifyPhoneOtp mints a custom token for the EXISTING account uid linked to
+  // the phone (server-side phoneAuthIndex), so this can never create a second
+  // account: one identity regardless of sign-in method.
+  const phoneSignIn = useCallback(async (phone, code) => {
+    try {
+      const r = await verifyPhoneOtp(phone, code);
+      if (!r?.ok || !r.token) return { ok: false, reason: r?.message || 'Sign-in failed.' };
+      const cred = await signInWithCustomToken(auth, r.token);
+      return await checkUserAccess(cred.user);
+    } catch (e) {
+      return { ok: false, reason: (e.message || 'Sign-in failed.').replace(/^Firebase: /, '') };
     }
   }, []); // eslint-disable-line
 
@@ -739,7 +773,7 @@ export function AppProvider({ children }) {
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
     addSlide, updateSlide, deleteSlide, setDefault,
     grantAccess, grantPendingAccess, addTechUsersForEmployees, loadPendingRequests, updateSettings,
-    signIn, appleSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
+    signIn, appleSignIn, phoneSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
     handbookPending, handbookDoc, signHandbook,
     totalChatUnread,
     recentNotifs, unreadNotifCount, markNotifRead,
@@ -757,7 +791,7 @@ export function AppProvider({ children }) {
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
     addSlide, updateSlide, deleteSlide, setDefault,
     grantAccess, grantPendingAccess, addTechUsersForEmployees, loadPendingRequests, updateSettings,
-    signIn, appleSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
+    signIn, appleSignIn, phoneSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
     handbookPending, handbookDoc, signHandbook,
     totalChatUnread, recentNotifs, unreadNotifCount, markNotifRead,
     ticket, ticketCount, addApptToTicket, removeApptFromTicket, addProductToTicket, setTicketProductQty, clearTicket,

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { getColorMode, setColorMode, subscribeColorMode } from '../lib/colorMode';
 import { useUserPrefs } from '../lib/userPrefs';
+import LinkedSignIns from './LinkedSignIns';
 
 export default function UserMenu() {
   const { gUser, signOut, switchAccount, hasFeature } = useApp();
@@ -103,6 +104,9 @@ export default function UserMenu() {
               </div>
             </div>
           )}
+
+          {/* One account, many sign-in methods — link Apple / phone here */}
+          <LinkedSignIns />
 
           {/* Actions */}
           <div style={{ padding: '6px 0' }}>

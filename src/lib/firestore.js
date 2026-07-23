@@ -3479,3 +3479,24 @@ export async function updateWaitlistEntry(id, data) {
 export async function removeWaitlistEntry(id) {
   await deleteDoc(doc(db, 'tenants', TENANT_ID, 'waitlist', id));
 }
+
+// ── Staff phone sign-in (custom SMS-OTP, NOT Firebase Phone Auth) ──────────
+// Same deployed callables the mobile app uses (PR #519). verifyPhoneOtp mints a
+// custom token for the EXISTING account uid linked to the phone (via
+// phoneAuthIndex) — one unified account regardless of sign-in method.
+export async function requestPhoneOtp(phone) {
+  const res = await callFn('requestPhoneOtp')({ phone });
+  return res?.data || { ok: false };
+}
+export async function verifyPhoneOtp(phone, code) {
+  const res = await callFn('verifyPhoneOtp')({ phone, code });
+  return res?.data || { ok: false };
+}
+export async function unlinkPhoneSignin() {
+  const res = await callFn('unlinkPhoneSignin')({});
+  return res?.data || { ok: false };
+}
+export async function getPhoneSigninStatus() {
+  const res = await callFn('getPhoneSigninStatus')({});
+  return res?.data || { ok: false, linked: false };
+}

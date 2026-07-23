@@ -2,11 +2,19 @@ import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 
 export default function AuthModal({ onClose, onSuccess }) {
-  const { signIn, appleSignIn, sendMagicLink } = useApp();
+  const { signIn, appleSignIn, phoneSignIn, sendMagicLink } = useApp();
   const [status,    setStatus]    = useState('');
   const [email,     setEmail]     = useState('');
   const [sending,   setSending]   = useState(false);
   const [linkSent,  setLinkSent]  = useState(false);
+  // Phone sign-in (staff SMS-OTP — same flow as mobile). Two phases: enter
+  // number → enter the 6-digit code. Collapsed behind a link to keep the
+  // modal compact.
+  const [showPhone, setShowPhone] = useState(false);
+  const [phone,     setPhone]     = useState('');
+  const [otpSent,   setOtpSent]   = useState(false);
+  const [otpCode,   setOtpCode]   = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
 
   async function handleGoogleSignIn() {
     setStatus('');
@@ -34,6 +42,33 @@ export default function AuthModal({ onClose, onSuccess }) {
     } finally {
       setSending(false);
     }
+  }
+
+  async function handleSendOtp() {
+    if (phone.replace(/\D/g, '').length < 10) { setStatus('Enter your 10-digit mobile number.'); return; }
+    setPhoneBusy(true);
+    setStatus('');
+    try {
+      const { requestPhoneOtp } = await import('../lib/firestore');
+      await requestPhoneOtp(phone.trim());
+      // Always advance — the server answers ok even for unlinked numbers
+      // (anti-enumeration). A wrong number surfaces at the verify step.
+      setOtpSent(true);
+    } catch (e) {
+      setStatus((e.message || 'Could not send the code.').replace(/^Firebase: /, ''));
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  async function handleVerifyOtp() {
+    if (otpCode.trim().length !== 6) { setStatus('Enter the 6-digit code from the text.'); return; }
+    setPhoneBusy(true);
+    setStatus('');
+    const result = await phoneSignIn(phone.trim(), otpCode.trim());
+    setPhoneBusy(false);
+    if (result.ok) { onSuccess?.(); onClose(); }
+    else if (result.reason) setStatus(result.reason);
   }
 
   return (
@@ -70,6 +105,57 @@ export default function AuthModal({ onClose, onSuccess }) {
           <svg width={16} height={16} viewBox="0 0 384 512" fill="#fff"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
           Sign in with Apple
         </button>
+
+        {/* Phone (staff SMS-OTP) — collapsed link, expands to number → code */}
+        {!showPhone ? (
+          <button onClick={() => { setShowPhone(true); setStatus(''); }}
+            style={{ width: '100%', padding: '4px 0 14px', border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--pn-text-muted)', textDecoration: 'underline', cursor: 'pointer', fontFamily: 'inherit' }}>
+            📱 Sign in with phone
+          </button>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            {!otpSent ? (
+              <>
+                <label style={{ fontSize: 11, color: 'var(--pn-text-muted)', display: 'block', marginBottom: 4 }}>Mobile number</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSendOtp()}
+                  placeholder="(614) 555-0100"
+                  autoComplete="tel"
+                  style={{ width: '100%', fontFamily: 'inherit', border: '1px solid var(--pn-border)', borderRadius: 8, padding: '9px 12px', fontSize: 13, outline: 'none', background: 'var(--pn-bg)', color: 'var(--pn-text)', boxSizing: 'border-box', marginBottom: 8 }}
+                />
+                <button onClick={handleSendOtp} disabled={phoneBusy}
+                  style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: phoneBusy ? '#d0d0d0' : '#2D7A5F', color: '#fff', fontSize: 14, fontWeight: 600, cursor: phoneBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                  {phoneBusy ? 'Sending…' : 'Text me a code'}
+                </button>
+              </>
+            ) : (
+              <>
+                <label style={{ fontSize: 11, color: 'var(--pn-text-muted)', display: 'block', marginBottom: 4 }}>6-digit code sent to {phone}</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={otpCode}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={e => e.key === 'Enter' && handleVerifyOtp()}
+                  placeholder="123456"
+                  autoComplete="one-time-code"
+                  style={{ width: '100%', fontFamily: 'inherit', border: '1px solid var(--pn-border)', borderRadius: 8, padding: '9px 12px', fontSize: 16, letterSpacing: 4, textAlign: 'center', outline: 'none', background: 'var(--pn-bg)', color: 'var(--pn-text)', boxSizing: 'border-box', marginBottom: 8 }}
+                />
+                <button onClick={handleVerifyOtp} disabled={phoneBusy}
+                  style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: phoneBusy ? '#d0d0d0' : '#2D7A5F', color: '#fff', fontSize: 14, fontWeight: 600, cursor: phoneBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                  {phoneBusy ? 'Verifying…' : 'Verify & sign in'}
+                </button>
+                <button onClick={() => { setOtpSent(false); setOtpCode(''); setStatus(''); }}
+                  style={{ width: '100%', marginTop: 6, border: 'none', background: 'none', fontSize: 11, color: 'var(--pn-text-faint)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                  Different number
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
