@@ -1,8 +1,9 @@
+import { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
 import Constants from 'expo-constants';
-import { auth } from '../lib/firebase';
+import { auth, callFn } from '../lib/firebase';
 import useMyTenants from '../hooks/useMyTenants';
-import { hasStoredTenant, clearCurrentTenant } from '../lib/currentTenant';
+import { hasStoredTenant, clearCurrentTenant, setCurrentTenant } from '../lib/currentTenant';
 import { clearPushTokenForUser } from '../hooks/usePushRegistration';
 import { gateState } from '../lib/tenantGate';
 import AccessPendingScreen from '../screens/AccessPendingScreen';
@@ -18,6 +19,26 @@ const isExpoGo = Constants.appOwnership === 'expo';
 // a revoked selection in the background. Decision table: lib/tenantGate.js.
 export default function TenantGate({ user, children }) {
   const { tenants, loading, error, reload } = useMyTenants();
+  // Explicit "Explore the demo salon" from AccessPendingScreen: registers the
+  // visitor (joinDemoAsVisitor), scopes queries to 'demo', and bypasses the
+  // pending verdict. UI-level override only — the pure gateState table stays
+  // untouched, and the rules/CF enforce what a visitor can actually read.
+  const [demoTour, setDemoTour] = useState(false);
+
+  const startDemoTour = async () => {
+    await callFn('joinDemoAsVisitor')({});
+    await setCurrentTenant('demo');
+    setDemoTour(true);
+  };
+
+  // Leave the tour the moment a real membership shows up (ribbon "check
+  // again" → reload → useMyTenants auto-selects the real tenant).
+  useEffect(() => {
+    if (demoTour && Array.isArray(tenants) && tenants.some(t => t.id !== 'demo')) {
+      setDemoTour(false);
+    }
+  }, [demoTour, tenants]);
+
   const verdict = gateState({
     hasStored: hasStoredTenant(),
     isAnonymous: !!user?.isAnonymous,
@@ -28,13 +49,13 @@ export default function TenantGate({ user, children }) {
   const demoOnly = Array.isArray(tenants) && tenants.length === 1 &&
     tenants[0]?.id === 'demo' && tenants[0]?.role === 'visitor';
 
-  if (verdict === 'pass') {
+  if (demoTour || verdict === 'pass') {
     // Zero-membership user auto-placed in the shared demo salon (visitor
     // pseudo-role from getMyTenants, behind tenants/demo.visitorMode). Show
     // a persistent ribbon so the tour is never mistaken for a real salon;
     // "Check again" re-asks getMyTenants — once an admin grants access the
     // real tenant replaces demo automatically.
-    if (demoOnly) {
+    if (demoTour || demoOnly) {
       return (
         <View style={{ flex: 1 }}>
           <View style={{ flex: 1 }}>{children}</View>
@@ -70,5 +91,5 @@ export default function TenantGate({ user, children }) {
     );
   }
 
-  return <AccessPendingScreen user={user} error={error} onRetry={reload} />;
+  return <AccessPendingScreen user={user} error={error} onRetry={reload} onTourDemo={startDemoTour} />;
 }
