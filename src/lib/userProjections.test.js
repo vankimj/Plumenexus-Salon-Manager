@@ -144,3 +144,28 @@ describe('buildReadonlyEmails', () => {
     expect(buildReadonlyEmails(undefined)).toEqual([]);
   });
 });
+
+describe('demo-visitor pseudo-role stays OUT of every projection', () => {
+  // `visitor` exists only in the getMyTenantRole CF return + the rules'
+  // stateless isDemoVisitor read widening. It must NEVER resolve caps or
+  // appear in a projection array — that would grant real staff/write access
+  // (buildStaffEmails projects any role with ≥1 cap into staffEmails, and
+  // isTenantStaff still gates several creates). Guard the invariant here so
+  // a future "register visitor in rbac" refactor fails loudly.
+  it('visitor is not a known role and projects into nothing', () => {
+    const users = [{ email: 'tourist@example.com', role: 'visitor' }];
+    expect(buildStaffEmails(users, null)).toEqual([]);
+    expect(buildAdminEmails(users, null)).toEqual([]);
+    expect(buildReadonlyEmails(users)).toEqual([]);
+    const caps = buildCapEmails(users, null);
+    for (const list of Object.values(caps)) expect(list).toEqual([]);
+  });
+  it('a custom-role overlay named "visitor" still cannot self-project as staff via the built-in path', () => {
+    // Even if a tenant defines a custom role literally called "visitor",
+    // projections follow the overlay's resolved caps — the pseudo-role the
+    // demo CF hands out never reaches saveUsers, so nothing changes for it.
+    const users = [{ email: 'tourist@example.com', role: 'visitor' }];
+    const overlay = { roles: {}, overrides: {} };
+    expect(buildStaffEmails(users, overlay)).toEqual([]);
+  });
+});

@@ -3186,7 +3186,19 @@ exports.getMyTenantRole = onCall({ cors: true }, async (request) => {
   const fullDoc = await db.doc(`tenants/${tenantId}/data/usersFull`).get();
   const users = fullDoc.exists ? (fullDoc.data().users || []) : [];
   const me = users.find(u => (u.email || '').toLowerCase() === callerEmail);
-  if (!me) return null;
+  if (!me) {
+    // Demo tenant: any signed-in account with no membership gets the
+    // view-only `visitor` pseudo-role. It exists ONLY here (and in the
+    // rules' stateless isDemoVisitor read widening) — it is deliberately
+    // NOT in lib/rbac ROLES/ROLE_CAPS, so it can never be assigned in the
+    // Users UI and never lands in staffEmails/adminEmails/capEmails
+    // projections (which would grant real write access). The caps below
+    // only shape which view-only tiles the client renders.
+    if (tenantId === 'demo') {
+      return { role: 'visitor', techName: null, scheduleAccess: 'view', caps: [...VISITOR_CAPS] };
+    }
+    return null;
+  }
   // Resolve the caller's effective caps server-side (built-ins + any custom
   // role overlay) so the client can gate its UI even when it can't read the
   // customRoles doc itself. The server still re-checks every sensitive action.
@@ -3263,6 +3275,24 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
   }));
   const results = resolved.filter(Boolean);
 
+  // Zero-membership callers get the shared demo salon as a view-only entry —
+  // but ONLY once tenants/demo.visitorMode === true (platform-admin flips it).
+  // Sequenced behind that flag so mobile clients built before the demo-banner
+  // UI shipped can never auto-select demo without explaining what it is.
+  if (!results.length && !isFounder) {
+    const demoDoc = tenantsSnap.docs.find(t => t.id === 'demo');
+    const dd = demoDoc ? (demoDoc.data() || {}) : null;
+    if (dd && dd.visitorMode === true && dd.active !== false) {
+      results.push({
+        id:        'demo',
+        name:      dd.name || 'Demo Studio',
+        plan:      dd.plan || null,
+        subdomain: dd.subdomain || 'demo',
+        role:      'visitor',
+      });
+    }
+  }
+
   // Sort: tenant where role is admin first, then by name.
   results.sort((a, b) => {
     if (a.role === 'admin' && b.role !== 'admin') return -1;
@@ -3271,6 +3301,54 @@ exports.getMyTenants = onCall({ cors: true, timeoutSeconds: 30 }, async (request
   });
 
   return { tenants: results };
+});
+
+// View-shaped caps for the demo-visitor pseudo-role: which tiles the tour
+// renders. Grants NOTHING server-side — a visitor is in no capEmails
+// projection, so every rules cap check stays false regardless of this list.
+// Excludes every action cap (pos, refund, walkin, chat, *_edit, marketing,
+// attendance, intake) and every owner cap (hr, settings, users, billing).
+const VISITOR_CAPS = [
+  'schedule', 'schedule_all',
+  'clients',
+  'reports', 'earnings_all',
+  'employees',
+  'memberships', 'meetings', 'programs', 'store',
+];
+
+// Registers the signed-in caller as a demo-tenant visitor. The rules-side
+// read access is stateless (isDemoVisitor — any authed uid), so this callable
+// is the telemetry + abuse-throttle front door, not the authorization: it
+// records tenants/demo/visitors/{uid} (swept after 30 idle days by
+// purgeOldTombstones) and rate-limits how fast NEW visitor accounts can pile
+// in. Returning visitors (doc already exists) bypass the rate gates so a
+// busy demo day can never lock out someone who already toured.
+exports.joinDemoAsVisitor = onCall({ cors: true }, async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required');
+  const db = getFirestore();
+  const demoDoc = await db.doc('tenants/demo').get();
+  if (!demoDoc.exists || (demoDoc.data() || {}).active === false) {
+    throw new HttpsError('failed-precondition', 'The demo salon is not available right now.');
+  }
+  const uid = request.auth.uid;
+  const ref = db.doc(`tenants/demo/visitors/${uid}`);
+  const existing = await ref.get();
+  if (!existing.exists) {
+    const ip = request.rawRequest?.ip || '';
+    const day = new Date().toISOString().slice(0, 10);
+    if (!(await fsRateAllow(db, 'demo', `demoJoin:${day}:${ipKeyPart(ip)}`, 10, 24 * 60 * 60 * 1000))) {
+      throw new HttpsError('resource-exhausted', 'Too many demo sign-ups from this network today — try again tomorrow.');
+    }
+    if (!(await fsRateAllow(db, 'demo', `demoJoinAll:${day}`, 200, 24 * 60 * 60 * 1000))) {
+      throw new HttpsError('resource-exhausted', 'The demo salon is at capacity today — try again tomorrow.');
+    }
+  }
+  await ref.set({
+    email:      String(request.auth.token.email || '').toLowerCase(),
+    joinedAt:   existing.exists ? (existing.data().joinedAt || new Date().toISOString()) : new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(),
+  }, { merge: true });
+  return { ok: true, tenantId: 'demo' };
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -16428,6 +16506,24 @@ exports.purgeOldTombstones = onSchedule(
         }
       } catch (e) {
         console.error(`[PurgeTombstones] tenant=${tenantId} rateCounters failed:`, e?.message);
+      }
+      // Idle demo visitors (joinDemoAsVisitor writes lastSeenAt). Single-field
+      // query — no composite index needed. Read access is stateless in rules,
+      // so sweeping a doc only drops the telemetry row, never a session.
+      if (tenantId === 'demo') {
+        try {
+          const snap = await db.collection('tenants/demo/visitors')
+            .where('lastSeenAt', '<', cutoff).limit(400).get();
+          if (!snap.empty) {
+            const batch = db.batch();
+            snap.docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+            totalPurged += snap.size;
+            console.log(`[PurgeTombstones] demo visitors: purged ${snap.size}`);
+          }
+        } catch (e) {
+          console.error('[PurgeTombstones] demo visitors failed:', e?.message);
+        }
       }
     });
 

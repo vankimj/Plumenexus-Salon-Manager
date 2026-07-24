@@ -25,7 +25,32 @@ export default function TenantGate({ user, children }) {
     loading, tenants, error,
   });
 
-  if (verdict === 'pass') return children;
+  const demoOnly = Array.isArray(tenants) && tenants.length === 1 &&
+    tenants[0]?.id === 'demo' && tenants[0]?.role === 'visitor';
+
+  if (verdict === 'pass') {
+    // Zero-membership user auto-placed in the shared demo salon (visitor
+    // pseudo-role from getMyTenants, behind tenants/demo.visitorMode). Show
+    // a persistent ribbon so the tour is never mistaken for a real salon;
+    // "Check again" re-asks getMyTenants — once an admin grants access the
+    // real tenant replaces demo automatically.
+    if (demoOnly) {
+      return (
+        <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }}>{children}</View>
+          <View style={{ backgroundColor: '#2D7A5F', paddingVertical: 8, paddingHorizontal: 14, paddingBottom: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Text style={{ color: '#fff', fontSize: 12.5, textAlign: 'center' }}>
+              <Text style={{ fontWeight: '700' }}>Demo tour</Text> — read-only sample salon
+            </Text>
+            <TouchableOpacity onPress={reload} style={{ borderWidth: 1, borderColor: 'rgba(255,255,255,.45)', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,.16)' }}>
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>I got access — check again</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+    return children;
+  }
 
   if (verdict === 'spinner') {
     // Escape hatch: the membership CF has a 30s server timeout — never trap

@@ -178,6 +178,8 @@ export default defineConfig({
       '**/.{idea,git,cache,output,temp}/**',
       '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*',
       'e2e/**', 'platform-admin/**', 'plumenexus/**', 'mobile/**',
+      // Firestore-rules tests need the emulator — run via `npm run test:rules`.
+      'tests/rules/**',
     ],
   },
 });
