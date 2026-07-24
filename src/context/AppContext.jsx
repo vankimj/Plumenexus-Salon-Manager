@@ -282,7 +282,11 @@ export function AppProvider({ children }) {
       try {
         const { httpsCallable } = await import('firebase/functions');
         const { functions } = await import('../lib/firebase');
-        const res = await httpsCallable(functions, 'getMyTenantRole')({});
+        const { TENANT_ID } = await import('../lib/tenant');
+        // Pass the web client's resolved tenant explicitly — the CF's own
+        // fallback default is the Meraki tenant, which silently resolved the
+        // wrong tenant for every other salon (and for the demo tour).
+        const res = await httpsCallable(functions, 'getMyTenantRole')({ tenantId: TENANT_ID });
         const me = res?.data;
         if (me && me.role) {
           const stub = { email: user.email, role: me.role };
@@ -348,21 +352,67 @@ export function AppProvider({ children }) {
         return { ok: false, reason: 'You hid your email, so we can\'t match you to your account. Sign in with Google, email, or phone — then add Apple from your profile menu, and Apple sign-in will work from then on (hidden email and all).' };
       }
 
-      // Write to requests collection (any authenticated user can write their own)
-      try {
-        await submitAccessRequest(user.uid, {
-          email:   user.email,
-          name:    user.displayName || user.email,
-          picture: user.photoURL || '',
-        });
-        logActivity('access_requested', user.email);
-      } catch (e) {
-        console.error('[Auth] access request write failed:', e);
+      // Write to requests collection (any authenticated user can write their
+      // own) — this is the salon-admin discovery path (Admin → Users), so it
+      // stays even when the demo tour below succeeds. Skipped on the demo
+      // tenant itself: a request filed against demo reaches no real admin.
+      const { TENANT_ID: currentTenant } = await import('../lib/tenant');
+      if (currentTenant !== 'demo') {
+        try {
+          await submitAccessRequest(user.uid, {
+            email:   user.email,
+            name:    user.displayName || user.email,
+            picture: user.photoURL || '',
+          });
+          logActivity('access_requested', user.email);
+        } catch (e) {
+          console.error('[Auth] access request write failed:', e);
+        }
+      }
+      // Unknown user → demo tour: register as a demo visitor and reload under
+      // the demo tenant override (TENANT_ID is captured in module-level consts,
+      // so a reload is mandatory). Never attempted when we're ALREADY on demo —
+      // that would reload-loop. On any failure (rate-limited, demo disabled)
+      // fall through to today's sign-out + "Access requested."
+      if (currentTenant !== 'demo') {
+        try {
+          const { joinDemoAsVisitor } = await import('../lib/firestore');
+          const r = await joinDemoAsVisitor();
+          if (r?.ok) {
+            sessionStorage.setItem('plumenexus_demo_origin', currentTenant);
+            sessionStorage.setItem('plumenexus_tenant_override', 'demo');
+            location.reload();
+            return { ok: false, reason: 'Taking you into the demo salon…' };
+          }
+        } catch (e) {
+          console.warn('[Auth] demo visitor join unavailable:', e?.message);
+        }
       }
       await fbSignOut(auth);
       return { ok: false, reason: 'Access requested. An admin will grant you access.' };
     }
-    if (rec.role === 'pending') { logActivity('login_blocked', 'pending', user.email); await fbSignOut(auth); return { ok: false, reason: 'Your access request is pending admin approval.' }; }
+    if (rec.role === 'pending') {
+      logActivity('login_blocked', 'pending', user.email);
+      // Pending hires are the core "tour while you wait" audience — same
+      // demo hand-off as the unknown-user branch above.
+      const { TENANT_ID: currentTenant } = await import('../lib/tenant');
+      if (currentTenant !== 'demo') {
+        try {
+          const { joinDemoAsVisitor } = await import('../lib/firestore');
+          const r = await joinDemoAsVisitor();
+          if (r?.ok) {
+            sessionStorage.setItem('plumenexus_demo_origin', currentTenant);
+            sessionStorage.setItem('plumenexus_tenant_override', 'demo');
+            location.reload();
+            return { ok: false, reason: 'Taking you into the demo salon…' };
+          }
+        } catch (e) {
+          console.warn('[Auth] demo visitor join unavailable:', e?.message);
+        }
+      }
+      await fbSignOut(auth);
+      return { ok: false, reason: 'Your access request is pending admin approval.' };
+    }
     if (rec.role === 'denied')  { logActivity('login_blocked', 'denied',  user.email); await fbSignOut(auth); return { ok: false, reason: 'Access denied. Contact an administrator.' }; }
 
     setGUser(user);
@@ -370,8 +420,9 @@ export function AppProvider({ children }) {
     startLogoutTimer(user, currentTimeoutMin);
     logActivity('user_login', `${user.email} (${rec.role})`);
 
-    // Check if this non-admin user needs to sign (or re-sign) the handbook
-    try {
+    // Check if this non-admin user needs to sign (or re-sign) the handbook.
+    // Demo visitors skip it — a tour must not open with a signature modal.
+    if (rec.role !== 'visitor') try {
       const hbk = await fetchHandbook();
       if (hbk?.content && hbk?.version) {
         const sig = await fetchMyHandbookSig(user.uid);
@@ -703,7 +754,11 @@ export function AppProvider({ children }) {
     : null;
   const realIsAdmin = _rec?.role === 'admin';
   const isAdmin     = viewAs ? false : realIsAdmin;
-  const isReadOnly  = viewAs ? viewAs.role === 'readonly' : ['admin', 'readonly'].includes(_rec?.role);
+  const isReadOnly  = viewAs ? viewAs.role === 'readonly' : ['admin', 'readonly', 'visitor'].includes(_rec?.role);
+  // Demo-tenant tour account (getMyTenantRole pseudo-role). Read-only by
+  // rules; this flag additionally drives the DemoVisitorBanner + hides
+  // action affordances that would only error on save.
+  const isVisitor   = !viewAs && _rec?.role === 'visitor';
   const isTech      = viewAs?.role === 'tech'      ? true : _rec?.role === 'tech';
   const isScheduler = viewAs?.role === 'scheduler' ? true : _rec?.role === 'scheduler';
   const myTechName  = viewAs?.role === 'tech' ? (viewAs.techName || null) : (viewAs ? null : (_rec?.techName || null));
@@ -727,6 +782,11 @@ export function AppProvider({ children }) {
   // when the client can't read the customRoles overlay (it usually can: staff).
   const myCaps  = Array.isArray(_rec?.caps) ? _rec.caps : null;
   const can = useCallback((cap) => {
+    // Visitor first: 'visitor' is a pseudo-role that exists only in the
+    // getMyTenantRole response — it's deliberately NOT in the rbac matrix
+    // (normalizeRole → null), so the overlay branch below would resolve it
+    // to zero tiles. Its server-sent caps list IS its capability set.
+    if (rawRole === 'visitor') return (myCaps || []).includes(cap);
     if (customRoles) return roleCan(rawRole, cap, customRoles);  // overlay = custom-role aware
     if (myCaps)      return myCaps.includes(cap);                // server-resolved fallback
     return roleCan(rawRole, cap);                                // static built-in matrix
@@ -767,7 +827,7 @@ export function AppProvider({ children }) {
     slides, def, cur, setCur,
     users, settings, setSettings,
     gUser, syncState, toast, toastAction, loaded, isOnline,
-    isAdmin, isReadOnly, isTech, isScheduler, myTechName, canEditOwnSchedule, realIsAdmin, viewAs, setViewAs,
+    isAdmin, isReadOnly, isVisitor, isTech, isScheduler, myTechName, canEditOwnSchedule, realIsAdmin, viewAs, setViewAs,
     role, rawRole, can, customRoles,
     isPortalUser, portalClientId,
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
@@ -786,7 +846,7 @@ export function AppProvider({ children }) {
   }), [
     slides, def, cur, setCur, users, settings, setSettings,
     gUser, syncState, toast, toastAction, loaded, isOnline,
-    isAdmin, isReadOnly, isTech, isScheduler, myTechName, canEditOwnSchedule, realIsAdmin, viewAs, setViewAs,
+    isAdmin, isReadOnly, isVisitor, isTech, isScheduler, myTechName, canEditOwnSchedule, realIsAdmin, viewAs, setViewAs,
     role, rawRole, can, customRoles, isPortalUser, portalClientId,
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
     addSlide, updateSlide, deleteSlide, setDefault,

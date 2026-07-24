@@ -3500,3 +3500,12 @@ export async function getPhoneSigninStatus() {
   const res = await callFn('getPhoneSigninStatus')({});
   return res?.data || { ok: false, linked: false };
 }
+
+// ── Demo-visitor tour ─────────────────────────────────────
+// Registers the signed-in caller as a demo-tenant visitor (rate-limited,
+// telemetry). Read access itself is stateless in the rules; AppContext
+// switches the tenant override to 'demo' + reloads after this succeeds.
+export async function joinDemoAsVisitor() {
+  const res = await callFn('joinDemoAsVisitor')({});
+  return res?.data || { ok: false };
+}

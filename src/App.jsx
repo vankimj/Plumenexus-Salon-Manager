@@ -10,6 +10,7 @@ import Toast from './components/Toast';
 import ThemeProvider from './components/ThemeProvider';
 import HomeScreen from './components/HomeScreen';
 import ModuleShell from './components/ModuleShell';
+import DemoVisitorBanner from './components/DemoVisitorBanner';
 import TicketCheckoutLauncher from './components/TicketCheckoutLauncher';
 import PinModal from './components/PinModal';
 
@@ -539,6 +540,7 @@ export default function App() {
           <div style={{ width: '100vw', height: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#eef0f3', overflow: 'hidden' }}>
             <AppShell initialView={isTipFlow ? 'tipflow' : 'home'} />
           </div>
+          <DemoVisitorBanner />
         </ThemeProvider>
       </AppProvider>
     );

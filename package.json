@@ -8,7 +8,7 @@
     "dev:emulated": "VITE_USE_EMULATORS=1 vite",
     "build": "vite build",
     "build:staging": "vite build --mode staging",
-    "version:print": "node -e \"const p=require('./package.json'); const sha=require('child_process').execSync('git rev-parse --short HEAD').toString().trim(); console.log('\\n🚀 Deployed: v'+p.version+' · '+sha+' · '+new Date().toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+'\\n   Look for this in the bottom-right badge of the app.\\n')\"",
+    "version:print": "node -e \"const p=require('./package.json'); const sha=require('child_process').execSync('git rev-parse --short HEAD').toString().trim(); console.log('\\n\ud83d\ude80 Deployed: v'+p.version+' \u00b7 '+sha+' \u00b7 '+new Date().toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'})+'\\n   Look for this in the bottom-right badge of the app.\\n')\"",
     "lint:deploy-gate": "eslint -c eslint.deploy-gate.config.js src/ --max-warnings 999",
     "deploy:prod": "npm test && npm run lint:deploy-gate && npm run build && firebase deploy --only hosting:app && npm run version:print",
     "deploy:safe": "npm test && npm run lint:deploy-gate && node scripts/deploy-safe.cjs && npm run version:print",
@@ -20,8 +20,8 @@
     "deploy:platform-admin": "cd platform-admin && npm install && npm run build && cd .. && firebase deploy --only hosting:platform-admin",
     "deploy:functions": "firebase deploy --only functions",
     "promote:staging": "npm run deploy:prod",
-    "rollback:prod": "git revert HEAD --no-edit && npm run deploy:prod && echo '\\n↩  Rolled prod back by reverting the last commit and redeploying.'",
-    "rollback:console": "node -e \"console.log('\\\\nOpen Firebase Console → Hosting → Release History to roll back to any specific past release:\\\\nhttps://console.firebase.google.com/project/plumenexus-prod/hosting/main\\\\n');\"",
+    "rollback:prod": "git revert HEAD --no-edit && npm run deploy:prod && echo '\\n\u21a9  Rolled prod back by reverting the last commit and redeploying.'",
+    "rollback:console": "node -e \"console.log('\\\\nOpen Firebase Console \u2192 Hosting \u2192 Release History to roll back to any specific past release:\\\\nhttps://console.firebase.google.com/project/plumenexus-prod/hosting/main\\\\n');\"",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -31,7 +31,8 @@
     "e2e:headed": "playwright test --headed",
     "e2e:ui": "playwright test --ui",
     "e2e:emulated": "firebase emulators:exec --only auth,firestore,functions --project plumenexus-prod \"node scripts/e2e-seed.cjs && E2E_EMULATORS=1 npx playwright test downgrade-gate.spec.js\"",
-    "test:otp:emulated": "firebase emulators:exec --only auth --project plumenexus-prod \"node scripts/otp-emulator-run.cjs\""
+    "test:otp:emulated": "firebase emulators:exec --only auth --project plumenexus-prod \"node scripts/otp-emulator-run.cjs\"",
+    "test:rules": "firebase emulators:exec --only firestore --project plumenexus-prod \"node tests/rules/demoVisitor.rules.test.mjs\""
   },
   "dependencies": {
     "@stripe/connect-js": "^3.4.5",
@@ -49,6 +50,7 @@
     "react-router-dom": "^7.14.2"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
     "@testing-library/dom": "^10.4.1",

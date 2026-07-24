@@ -110,6 +110,21 @@ service cloud.firestore {
           get(/databases/$(database)/documents/tenants/$(tenantId)/data/users)
             .data.get('capEmails', {}).get(cap, []);
     }
+    // Demo-tenant visitor: ANY signed-in account may READ the shared 'demo'
+    // tenant (literal id — can never match a real salon). Powers the
+    // zero-membership tour: joinDemoAsVisitor (CF) registers the visit and
+    // getMyTenantRole hands back the view-only pseudo-role; the rules stay
+    // stateless so a visitor-doc sweep can never lock the demo out.
+    // INVARIANT: this helper must appear ONLY on `allow read` lines —
+    // `grep isDemoVisitor firestore.rules` must hit this definition and
+    // reads, nothing else. Visitors are in NO projection array (staffEmails/
+    // adminEmails/capEmails), so every staff/admin/writer gate stays false.
+    // data/users, data/usersFull, logs, settingsPrivate, payroll, expenses,
+    // taxForms, attendance and employee contact/comp sub-docs are
+    // deliberately NOT widened — real emails/PII never reach a visitor.
+    function isDemoVisitor(tenantId) {
+      return tenantId == 'demo' && isAuthenticated();
+    }
 
     // ── Legacy path (read-only for migration) ────────────
     match /salon/{document} {
@@ -291,7 +306,7 @@ service cloud.firestore {
         allow read, write: if isTenantAdmin(tenantId);
       }
       match /data/settings {
-        allow read:  if isTenantStaff(tenantId) || isKiosk(tenantId);  // kiosk needs taxRate/ccFee/terminal cfg
+        allow read:  if isTenantStaff(tenantId) || isKiosk(tenantId) || isDemoVisitor(tenantId);  // kiosk needs taxRate/ccFee/terminal cfg
         allow write: if isTenantAdmin(tenantId);
       }
       // Custom role definitions (owner-defined roles + built-in cap overrides).
@@ -299,7 +314,7 @@ service cloud.firestore {
       // callable-only (saveCustomRoles) which validates caps + protects Owner —
       // never a direct client write, so a staffer can't grant themselves caps.
       match /data/customRoles {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if false;
       }
       // Sensitive credentials (OAuth tokens, third-party API keys cached
@@ -328,7 +343,7 @@ service cloud.firestore {
         allow write: if false;
       }
       match /data/handbook {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantAdmin(tenantId);
       }
       match /data/bookingConfig {
@@ -468,9 +483,10 @@ service cloud.firestore {
         allow read, write: if isTenantStaff(tenantId) && request.auth.uid == uid;
       }
 
-      // Clients: only this tenant's staff can read/write
+      // Clients: only this tenant's staff can read/write (+ demo visitors,
+      // read-only — demo clients are synthetic `_demo` seed data)
       match /clients/{clientId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         // Non-admin staff may write client profiles but NOT the `credit` (store
         // credit = real money) field — a tech could otherwise set credit=9999 and
         // redeem it, minting money with no ledger entry. All credit changes go
@@ -494,7 +510,7 @@ service cloud.firestore {
         // getMyProgress Cloud Function (a subcollection can't cheaply match the
         // caller's email in a rule), so no direct client read here.
         match /progress/{entryId} {
-          allow read:  if isTenantStaff(tenantId);
+          allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantWriter(tenantId);
         }
       }
@@ -534,7 +550,7 @@ service cloud.firestore {
       // XSS / oversized-payload sink. Public single-field check-in update
       // also stays so the booking confirmation link works without auth.
       match /appointments/{apptId} {
-        allow read:           if isTenantStaff(tenantId);
+        allow read:           if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         // Create is STAFF-ONLY. Public online bookings no longer write here
         // directly — they go through the submitOnlineBooking Cloud Function,
         // which re-runs the banned / cancellation / booking-card / honeypot
@@ -552,8 +568,12 @@ service cloud.firestore {
         // Staff writes require schedule-edit permission (view-only techs
         // are blocked); the public check-in branch stays open for the
         // booking-confirmation link.
+        // The public check-in branch is closed for the demo tenant — a demo
+        // visitor (or anyone) could otherwise stamp fake check-ins onto the
+        // shared demo schedule that every other visitor sees.
         allow update:         if canEditSchedule(tenantId) || (
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkedInAt'])
+          tenantId != 'demo'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkedInAt'])
           && resource.data.get('checkedInAt', null) == null
           && request.resource.data.checkedInAt is string
         );
@@ -563,7 +583,7 @@ service cloud.firestore {
       // render block-out overlays; staff write so techs can self-manage and
       // admins/schedulers can manage anyone.
       match /timeOff/{timeOffId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantWriter(tenantId);
       }
 
@@ -576,7 +596,7 @@ service cloud.firestore {
       // Memberships (per-client subscriptions): staff read for checkout +
       // admin write to assign/cancel.
       match /memberships/{membershipId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantAdmin(tenantId);
         // Per-membership refund history (written by stripeWebhook on
         // charge.refunded for membership subscriptions). Read: tenant
@@ -639,7 +659,9 @@ service cloud.firestore {
       // Legacy meetings without `participantEmails` default to admin-only
       // when private — safe fallback if the projection is missing.
       match /meetings/{meetingId} {
-        allow read: if isTenantStaff(tenantId) && (
+        // Demo visitors ride the same private-meeting condition below —
+        // they only ever satisfy the `private != true` branch.
+        allow read: if (isTenantStaff(tenantId) || isDemoVisitor(tenantId)) && (
           resource.data.private != true
           || isTenantAdmin(tenantId)
           || (resource.data.createdBy is string && resource.data.createdBy == request.auth.token.email.lower())
@@ -668,7 +690,7 @@ service cloud.firestore {
       // admin gate on writes, a tech could open the JS console and
       // self-issue an arbitrary balance.
       match /giftCards/{cardId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantAdmin(tenantId);
       }
 
@@ -718,7 +740,7 @@ service cloud.firestore {
       // admin can do everything else. Stock-only updates by non-admin
       // staff during checkout are permitted via a narrow diff allowlist.
       match /products/{productId} {
-        allow read:   if isTenantStaff(tenantId);
+        allow read:   if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow create, delete: if isTenantAdmin(tenantId);
         allow update: if isTenantAdmin(tenantId)
           || (isTenantStaff(tenantId)
@@ -731,7 +753,7 @@ service cloud.firestore {
       // the getPublicStore Cloud Function (Admin SDK, safe-field projection),
       // so no public read here. The server also lazily writes stripe*Id back.
       match /storeProducts/{productId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantAdmin(tenantId);
       }
       // Orders: server-written money/audit records. The portal client whose
@@ -763,14 +785,14 @@ service cloud.firestore {
       // Program templates (week→day→exercise plans): staff (trainers) build and
       // reuse them. No client PII.
       match /programTemplates/{programId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if isTenantWriter(tenantId);
       }
       // Assigned client programs: staff full access; the portal client whose
       // email matches `clientEmail` can READ their own program (same pattern as
       // chats) so the portal can render it without a Cloud Function.
       match /clientPrograms/{cpId} {
-        allow read:  if isTenantStaff(tenantId) ||
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId) ||
                         (isAuthenticated() && resource.data.clientEmail == request.auth.token.email);
         allow write: if isTenantWriter(tenantId);
       }
@@ -779,12 +801,12 @@ service cloud.firestore {
       // grantSessionPack Cloud Function + the appointment-done trigger (Admin
       // SDK); admin may write to correct a balance by hand.
       match /sessionPacks/{packId} {
-        allow read:  if isTenantStaff(tenantId) ||
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId) ||
                         (isAuthenticated() && resource.data.clientEmail == request.auth.token.email);
         allow write: if isTenantAdmin(tenantId);
         // Immutable per-pack ledger — every grant/decrement, written server-only.
         match /ledger/{entryId} {
-          allow read:  if isTenantStaff(tenantId);
+          allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
           allow write: if false;
         }
       }
@@ -795,7 +817,10 @@ service cloud.firestore {
       // Admin reads/manages; Cloud Function updates via admin SDK.
       match /receipts/{receiptId} {
         allow create:               if isTenantStaff(tenantId);
-        allow read, update, delete: if isTenantAdmin(tenantId);
+        // Demo visitors get READ only — the Reports tile (revenue/earnings)
+        // is the core of the "admin views" tour. Demo receipts are seed data.
+        allow read:                 if isTenantAdmin(tenantId) || isDemoVisitor(tenantId);
+        allow update, delete:       if isTenantAdmin(tenantId);
       }
 
       // Financial ledger — append-only audit trail of every money movement,
@@ -803,7 +828,7 @@ service cloud.firestore {
       // Admin SDK. Owner/admin reads it for reconciliation; never client-writable
       // (immutable) so the audit log can be trusted.
       match /ledger/{entryId} {
-        allow read:  if isTenantAdmin(tenantId);
+        allow read:  if isTenantAdmin(tenantId) || isDemoVisitor(tenantId);
         allow write: if false;
       }
 
@@ -812,7 +837,7 @@ service cloud.firestore {
       // Reports → Service Ratings tab reads them. Without this rule the read was
       // denied by default and the report was always empty.
       match /serviceRatings/{ratingId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if false;
       }
 
@@ -838,7 +863,7 @@ service cloud.firestore {
       // findOrCreateClient via the Admin SDK; staff read them in the
       // Cancellations & No-Shows report. No client writes.
       match /fraudBlocks/{blockId} {
-        allow read:  if isTenantStaff(tenantId);
+        allow read:  if isTenantStaff(tenantId) || isDemoVisitor(tenantId);
         allow write: if false;
       }
 
@@ -851,14 +876,17 @@ service cloud.firestore {
       // Client chat threads. Chat docs are keyed by clientId and store the
       // client's email in `clientEmail`. Staff get full access; the portal
       // client whose email matches owns the chat.
+      // The portal-client (email-match) write branches are closed for the
+      // demo tenant — a demo visitor could otherwise create/update chat
+      // threads (clientEmail = their own) that spam the shared demo salon.
       match /chats/{chatId} {
         allow read:   if isTenantStaff(tenantId) ||
                          (isAuthenticated() && resource.data.clientEmail == request.auth.token.email);
         allow create: if isTenantStaff(tenantId) ||
-                         (isAuthenticated() &&
+                         (isAuthenticated() && tenantId != 'demo' &&
                           request.resource.data.clientEmail == request.auth.token.email);
         allow update: if isTenantStaff(tenantId) ||
-                         (isAuthenticated() &&
+                         (isAuthenticated() && tenantId != 'demo' &&
                           resource.data.clientEmail == request.auth.token.email &&
                           request.resource.data.clientEmail == request.auth.token.email);
         allow delete: if isTenantStaff(tenantId);
@@ -980,7 +1008,10 @@ service cloud.firestore {
       // phone or email. Staff resolve full contact via clientId -> client doc.
       match /waitlist/{entryId} {
         allow read: if true;
-        allow create: if !('clientPhone' in request.resource.data)
+        // Demo carve-out: the queue is world-readable, so open create would
+        // let anyone push visible spam rows onto the shared demo lobby board.
+        allow create: if tenantId != 'demo'
+                      && !('clientPhone' in request.resource.data)
                       && !('clientEmail' in request.resource.data);
         allow update, delete: if isTenantStaff(tenantId);
       }
