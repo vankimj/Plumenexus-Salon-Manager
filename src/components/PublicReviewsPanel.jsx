@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { subscribeGoogleReviews, subscribeWebfrontConfig, fetchEmployees, refreshGoogleReviewsCache,
          subscribeGoogleBusinessAuth, subscribeGoogleReviewsLog, syncGoogleBusinessReviews } from '../lib/firestore';
+import { subscribeLocations, activeLocations } from '../lib/locations';
 import { logActivity } from '../lib/logger';
 import { ConfigureReviewsLink } from './CompetitorRankingPanel';
 
@@ -21,18 +22,21 @@ export default function PublicReviewsPanel() {
   const [loading, setLoading]     = useState(true);
   const [sort, setSort]           = useState('date-desc');
   const [filterTech, setFilter]   = useState('');
+  const [filterLoc, setFilterLoc] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr]             = useState('');
   const [gbpAuth, setGbpAuth]     = useState(null);
   const [fullReviews, setFullReviews] = useState(null);
+  const [locState, setLocState]   = useState(null);
 
   useEffect(() => {
     const unsubR = subscribeGoogleReviews(d => { setData(d); setLoading(false); });
     const unsubW = subscribeWebfrontConfig(setWfCfg);
     const unsubG = subscribeGoogleBusinessAuth(setGbpAuth);
     const unsubL = subscribeGoogleReviewsLog(setFullReviews);
+    const unsubLoc = subscribeLocations(setLocState);
     fetchEmployees().then(es => setEmployees(es || [])).catch(() => setEmployees([]));
-    return () => { unsubR(); unsubW(); unsubG(); unsubL(); };
+    return () => { unsubR(); unsubW(); unsubG(); unsubL(); unsubLoc(); };
   }, []);
 
   // Use the full Business Profile sync when available, otherwise fall back
@@ -94,10 +98,27 @@ export default function PublicReviewsPanel() {
     });
   }, [sourceReviews, matchers]);
 
+  // Distinct locations present in the synced reviews (multi-location tenants
+  // only). Keyed by appLocationId when a review is mapped, else its raw Google
+  // locationName. Labels prefer the app-location name, then the Google title.
+  const locOptions = useMemo(() => {
+    if (!useFullSource) return [];
+    const appById = new Map(activeLocations(locState).map(l => [l.id, l.name || l.id]));
+    const titleByName = new Map((gbpAuth?.locations || []).map(e => [e.locationName, e.locationTitle || e.locationName]));
+    const map = new Map();
+    for (const r of (fullReviews || [])) {
+      const key = r.appLocationId || r.locationName;
+      if (!key || map.has(key)) continue;
+      map.set(key, appById.get(key) || titleByName.get(key) || key);
+    }
+    return [...map.entries()].map(([key, label]) => ({ key, label }));
+  }, [useFullSource, fullReviews, locState, gbpAuth]);
+
   const filtered = useMemo(() => {
     let list = enriched;
     if (filterTech === '__any__') list = list.filter(r => r.mentions.length > 0);
     else if (filterTech) list = list.filter(r => r.mentionIds.includes(filterTech));
+    if (filterLoc) list = list.filter(r => (r.appLocationId || r.locationName || '') === filterLoc);
     const cmp = {
       'date-desc':   (a, b) => (b.ts ?? 0) - (a.ts ?? 0),
       'date-asc':    (a, b) => (a.ts ?? Infinity) - (b.ts ?? Infinity),
@@ -106,7 +127,7 @@ export default function PublicReviewsPanel() {
       'mentions':    (a, b) => b.mentions.length - a.mentions.length,
     }[sort];
     return [...list].sort(cmp);
-  }, [enriched, filterTech, sort]);
+  }, [enriched, filterTech, filterLoc, sort]);
 
   const stats = useMemo(() => {
     const list = enriched;
@@ -226,6 +247,16 @@ export default function PublicReviewsPanel() {
                 ))}
               </select>
             </div>
+            {locOptions.length > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--pn-text-faint)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Location</span>
+                <select value={filterLoc} onChange={e => setFilterLoc(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--pn-border-strong)', background: 'var(--pn-surface)', color: 'var(--pn-text)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer', minWidth: 150 }}>
+                  <option value="">All locations</option>
+                  {locOptions.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              </div>
+            )}
             <div style={{ fontSize: 11, color: 'var(--pn-text-faint)', marginLeft: 'auto' }}>
               Showing {filtered.length} of {enriched.length}
             </div>

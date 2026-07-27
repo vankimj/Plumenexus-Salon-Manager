@@ -3325,12 +3325,18 @@ export async function startGoogleBusinessAuth() {
   const res = await callFn('startGoogleBusinessAuth')({ tenantId: TENANT_ID });
   return res.data;
 }
-export async function syncGoogleBusinessReviews() {
-  const res = await callFn('syncGoogleBusinessReviews')({ tenantId: TENANT_ID });
+export async function syncGoogleBusinessReviews(locationName) {
+  const res = await callFn('syncGoogleBusinessReviews')({ tenantId: TENANT_ID, ...(locationName ? { locationName } : {}) });
   return res.data;
 }
 export async function disconnectGoogleBusiness() {
   const res = await callFn('disconnectGoogleBusiness')({ tenantId: TENANT_ID });
+  return res.data;
+}
+// Per-location management: remap to an app location ({ appLocationId }), toggle
+// ({ active }), or remove ({ remove: true }) a single connected Google location.
+export async function updateGoogleBusinessLocation(locationName, patch = {}) {
+  const res = await callFn('updateGoogleBusinessLocation')({ tenantId: TENANT_ID, locationName, ...patch });
   return res.data;
 }
 
