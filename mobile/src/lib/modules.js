@@ -57,7 +57,7 @@ export function isModuleEnabled(settings, moduleId) {
 }
 
 // Plan gate + role gate + owner-disabled + per-tile hide. Pure — same as web.
-export function getVisibleModules(settings, { isAdmin, role, hiddenTiles, customRoles } = {}) {
+export function getVisibleModules(settings, { isAdmin, role, caps, hiddenTiles, customRoles } = {}) {
   const plan = effectivePlan(settings);
   const hidden = new Set(hiddenTiles || settings?.hiddenTiles || []);
   // isAdmin ALWAYS wins: an admin can be flagged admin (bootstrap email / coarse
@@ -66,8 +66,15 @@ export function getVisibleModules(settings, { isAdmin, role, hiddenTiles, custom
   // Treat admins as owner (full caps); gate everyone else on their role's caps.
   const effRole = isAdmin ? 'owner' : role;
   const known = !!(effRole && roleExists(effRole, customRoles));
+  // Server-resolved caps (e.g. the demo 'visitor' pseudo-role, which isn't in
+  // the rbac matrix so `known` is false). Gate on this list instead of the
+  // legacy adminOnly fallback, so a visitor sees exactly the read-only tiles
+  // the server intends (schedule/clients/reports/employees/meetings/
+  // memberships) and none of the write-only ones (services/walkin/chat).
+  const capList = !known && Array.isArray(caps) ? caps : null;
   return MODULES.filter(m => {
     if (known) { if (m.cap && !roleCan(effRole, m.cap, customRoles)) return false; }  // RBAC capability gate
+    else if (capList) { if (m.cap && !capList.includes(m.cap)) return false; }        // server-resolved caps (visitor)
     else if (m.adminOnly && !isAdmin) return false;                                   // legacy fallback (no/unknown role)
     if (!isModuleAvailableForPlan(m, plan)) return false;
     if (!isModuleEnabled(settings, m.id)) return false;
@@ -84,7 +91,7 @@ export function getVisibleModules(settings, { isAdmin, role, hiddenTiles, custom
 export const MOBILE_MODULE_META = {
   schedule:    { icon: 'calendar',  tab: 'Schedule' },
   clients:     { icon: 'people',    tab: 'Clients' },
-  earnings:    { icon: 'dollar',    tab: 'Earnings' },
+  earnings:    { icon: 'dollar',    tab: 'Dashboard' },  // earnings live on the Dashboard; no separate Earnings tab
   chat:        { icon: 'chat',      screen: 'ManageChat' },
   services:    { icon: 'scissors',  screen: 'Services' },
   products:    { icon: 'box',       screen: 'Products' },

@@ -224,10 +224,14 @@ export default function ScheduleScreen({ navigation }) {
   const { theme } = useTheme();
   const styles = useThemedStyles(makeStyles);
   const { employee, techName, loading: empLoading } = useCurrentEmployee();
-  const { isAdmin, role, canEditSchedule, email } = useTenantAccess();
+  const { isAdmin, role, canEditSchedule, email, isVisitor, caps } = useTenantAccess();
   // Who may view the WHOLE salon's schedule (RBAC schedule_all): owner/manager/
   // scheduler. A plain tech stays scoped to their own. (admin === owner.)
-  const canSeeAll = isAdmin || role === 'manager' || role === 'scheduler';
+  // Demo visitor has the schedule_all read cap but no techName, so without this
+  // the calendar would render zero columns (reads as "broken"). Let them VIEW
+  // every tech; writes stay gated on canEditSchedule (false for a visitor).
+  const canSeeAll = isAdmin || role === 'manager' || role === 'scheduler'
+    || (isVisitor && (caps || []).includes('schedule_all'));
   useTrashHeader(navigation, ['appointments', 'timeOff'], isAdmin);
   const [date,    setDate]    = useState(todayStr());
   const [appts,   setAppts]   = useState([]);
@@ -586,7 +590,7 @@ export default function ScheduleScreen({ navigation }) {
           workDays={employee?.workDays}
           timeOff={timeOff}
           onTapAppt={(a) => setDetail(a)}
-          onTapEmpty={(d, startTime) => setCreatePrefill({ date: d, startTime, techName: showAll ? '' : (techName || '') })}
+          onTapEmpty={canEditSchedule ? ((d, startTime) => setCreatePrefill({ date: d, startTime, techName: showAll ? '' : (techName || '') })) : undefined}
           onPickDay={(d) => { setDate(d); setView('day'); }}
         />
       )}
@@ -609,13 +613,13 @@ export default function ScheduleScreen({ navigation }) {
             refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); reloadTimeOff(); setTimeout(() => setRefreshing(false), 600); }}
             onTapAppt={(a) => setDetail(a)}
-            onTapEmpty={(startTime, tech) => setCreatePrefill({ date, startTime, techName: tech ?? '' })}
-            onReschedule={async (a, patch) => {
+            onTapEmpty={canEditSchedule ? ((startTime, tech) => setCreatePrefill({ date, startTime, techName: tech ?? '' })) : undefined}
+            onReschedule={canEditSchedule ? (async (a, patch) => {
               if (clockGateBlocked()) return;
               setAppts(prev => prev.map(x => x.id === a.id ? { ...x, ...patch } : x));
               try { await updateAppointment(a.id, patch); notifyAffectedTechs(a, { ...a, ...patch }).catch(() => {}); }
               catch (e) { Alert.alert('Couldn\'t move', e?.message || 'Try again.'); setAppts(prev => prev.map(x => x.id === a.id ? { ...x, startTime: a.startTime, techName: a.techName } : x)); }
-            }}
+            }) : undefined}
           />
         ) : (
           <DayTimelineView
@@ -631,13 +635,13 @@ export default function ScheduleScreen({ navigation }) {
             refreshing={refreshing}
             onRefresh={() => { setRefreshing(true); reloadTimeOff(); setTimeout(() => setRefreshing(false), 600); }}
             onTapAppt={(a) => setDetail(a)}
-            onTapEmpty={(startTime) => setCreatePrefill({ date, startTime, techName: showAll ? '' : (techName || '') })}
-            onReschedule={async (a, patch) => {
+            onTapEmpty={canEditSchedule ? ((startTime) => setCreatePrefill({ date, startTime, techName: showAll ? '' : (techName || '') })) : undefined}
+            onReschedule={canEditSchedule ? (async (a, patch) => {
               if (clockGateBlocked()) return;
               setAppts(prev => prev.map(x => x.id === a.id ? { ...x, ...patch } : x));
               try { await updateAppointment(a.id, patch); notifyAffectedTechs(a, { ...a, ...patch }).catch(() => {}); }
               catch (e) { Alert.alert('Couldn\'t move', e?.message || 'Try again.'); setAppts(prev => prev.map(x => x.id === a.id ? { ...x, startTime: a.startTime, techName: a.techName } : x)); }
-            }}
+            }) : undefined}
           />
         )
       )}
@@ -864,7 +868,7 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
             onPress={() => {
               if (moving) { onReschedule?.(moving, { startTime, techName: moving.techName }); setMoving(null); }
               else if (blk) onDeleteBlock?.(blk.entry);           // tap a block-out to remove it
-              else if (!slotList.length) onTapEmpty(startTime);   // empty cells add; each appt handles its own tap below
+              else if (!slotList.length) onTapEmpty?.(startTime);   // empty cells add; each appt handles its own tap below
             }}
             delayLongPress={300}
             activeOpacity={moving ? 0.6 : 1}
@@ -915,9 +919,9 @@ function DayTimelineView({ appts, date, showAll, allTechs, clientsById, workDays
                 <View style={[styles.dayApptBlock, { backgroundColor: theme.surfaceMuted, borderLeftColor: theme.textMuted, borderStyle: 'dashed', borderWidth: 1, borderColor: theme.border, height: SLOT_PX - 4, justifyContent: 'center' }]}>
                   {slotMin === blk.startMin && <Text style={styles.blockBandText} numberOfLines={1}>⛔ {blk.reason}</Text>}
                 </View>
-              ) : (
+              ) : onTapEmpty ? (
                 <Text style={styles.dayEmptyHint}>＋</Text>
-              )}
+              ) : null}
             </View>
           </TouchableOpacity>
         );
@@ -1036,7 +1040,7 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
                       return (
                         <View key={idx} pointerEvents="none"
                           style={[styles.gridSlot, { top: idx * SLOT_PX, height: SLOT_PX, width: colW }, isHour && styles.gridSlotHour]}>
-                          {!occ.covered[idx] && <Text style={styles.gridPlus}>＋</Text>}
+                          {!occ.covered[idx] && onTapEmpty && <Text style={styles.gridPlus}>＋</Text>}
                         </View>
                       );
                     })}
@@ -1044,6 +1048,7 @@ function DayGridView({ appts, allTechs, clientsById, date, timeOff, onDeleteBloc
                       activeOpacity={0.6}
                       style={[styles.gridTapLayer, { width: colW, height: GRID_H }]}
                       onPress={(e) => {
+                        if (!onTapEmpty) return;
                         const idx = Math.floor((e.nativeEvent.locationY || 0) / SLOT_PX);
                         if (idx < 0 || idx >= SLOT_COUNT || occ.covered[idx]) return;
                         onTapEmpty(minToHHMM(DAY_START_MIN + idx * SLOT_MINUTES), t);
@@ -1202,15 +1207,21 @@ function WeekView({ date, techName, showAll, allTechs, clientsById, workDays, ti
                 </Text>
               </View>
             ) : appts.length === 0 ? (
-              <TouchableOpacity
-                style={styles.weekDayEmpty}
-                onPress={() => onTapEmpty(d.iso, minToHHMM(window.startMin))}
-                activeOpacity={0.6}
-              >
-                <Text style={styles.weekDayEmptyText}>
-                  ＋ Add appointment ({fmtTime(minToHHMM(window.startMin))} – {fmtTime(minToHHMM(window.endMin))})
-                </Text>
-              </TouchableOpacity>
+              onTapEmpty ? (
+                <TouchableOpacity
+                  style={styles.weekDayEmpty}
+                  onPress={() => onTapEmpty(d.iso, minToHHMM(window.startMin))}
+                  activeOpacity={0.6}
+                >
+                  <Text style={styles.weekDayEmptyText}>
+                    ＋ Add appointment ({fmtTime(minToHHMM(window.startMin))} – {fmtTime(minToHHMM(window.endMin))})
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.weekDayEmpty}>
+                  <Text style={styles.weekDayEmptyText}>No appointments</Text>
+                </View>
+              )
             ) : (
               <View style={{ paddingHorizontal: 8, paddingBottom: 8 }}>
                 {(() => {
@@ -1246,19 +1257,19 @@ function WeekView({ date, techName, showAll, allTechs, clientsById, workDays, ti
                       const label = mins >= 60
                         ? `${Math.floor(mins / 60)}h${mins % 60 ? ' ' + (mins % 60) + 'm' : ''} open`
                         : `${mins}m open`;
+                      const GapComp = onTapEmpty ? TouchableOpacity : View;
                       return (
-                        <TouchableOpacity
+                        <GapComp
                           key={row.key}
                           style={styles.weekGapRow}
-                          onPress={() => onTapEmpty(d.iso, minToHHMM(row.from))}
-                          activeOpacity={0.6}
+                          {...(onTapEmpty ? { onPress: () => onTapEmpty(d.iso, minToHHMM(row.from)), activeOpacity: 0.6 } : {})}
                         >
                           <View style={styles.weekGapLine} />
                           <Text style={styles.weekGapText}>
-                            {fmtTime(minToHHMM(row.from))} – {fmtTime(minToHHMM(row.to))} · {label} ＋
+                            {fmtTime(minToHHMM(row.from))} – {fmtTime(minToHHMM(row.to))} · {label}{onTapEmpty ? ' ＋' : ''}
                           </Text>
                           <View style={styles.weekGapLine} />
-                        </TouchableOpacity>
+                        </GapComp>
                       );
                     }
                     const a = row.appt;

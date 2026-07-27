@@ -17,6 +17,7 @@ import { BUILD_LABEL } from '../lib/version';
 import PhoneSigninSetting from '../components/PhoneSigninSetting';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
 import useMyTenants from '../hooks/useMyTenants';
+import useTenantAccess from '../hooks/useTenantAccess';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
 import useResponsive from '../hooks/useResponsive';
 
@@ -26,6 +27,7 @@ export default function ProfileScreen({ navigation }) {
   const { contentMaxWidth } = useResponsive();
   const user = auth.currentUser;
   const { employee, loading: empLoading } = useCurrentEmployee();
+  const { isVisitor } = useTenantAccess();
   const { tenants, current: currentTenant, switchTo, loading: tenantsLoading } = useMyTenants();
   const [draft,   setDraft]   = useState(null);
   const [editing, setEditing] = useState(false);
@@ -489,7 +491,7 @@ export default function ProfileScreen({ navigation }) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.tenantName}>{t.name}</Text>
                     <Text style={styles.tenantMeta}>
-                      {t.role === 'admin' ? 'Admin' : 'Staff'}
+                      {t.role === 'admin' ? 'Admin' : t.role === 'visitor' ? 'Demo' : 'Staff'}
                       {t.plan ? ` · ${t.plan}` : ''}
                     </Text>
                   </View>
@@ -644,7 +646,7 @@ export default function ProfileScreen({ navigation }) {
           />
         </View>
 
-        <PhoneSigninSetting />
+        {!isVisitor && <PhoneSigninSetting />}
 
         <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
           <Text style={styles.signOutText}>Sign out</Text>

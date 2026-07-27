@@ -33,8 +33,10 @@ export default function ClientDetailScreen({ route, navigation }) {
   const styles = useThemedStyles(makeStyles);
   const { contentMaxWidth } = useResponsive();
   const { theme } = useTheme();
-  const { isAdmin, role, techName } = useTenantAccess();
-  const canAdjust = isAdmin || role === 'tech' || !!techName;
+  const { isAdmin, role, techName, isVisitor } = useTenantAccess();
+  // Read-only roles (demo visitor) get no write affordances — a save would only
+  // be denied by the Firestore rules and surface a raw permission error.
+  const canAdjust = !isVisitor && (isAdmin || role === 'tech' || !!techName);
   const [adjOpen, setAdjOpen]     = useState(false);
   const [adjAmt, setAdjAmt]       = useState('');
   const [adjDir, setAdjDir]       = useState('add');
@@ -89,7 +91,9 @@ export default function ClientDetailScreen({ route, navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        editing
+        !canAdjust
+          ? null   // read-only (visitor): no Edit affordance
+          : editing
           ? <TouchableOpacity onPress={handleSave} disabled={saving} style={{ marginRight: 12 }}>
               <Text style={[styles.headerBtn, saving && { opacity: 0.5 }]}>
                 {saving ? 'Saving…' : 'Save'}
@@ -100,7 +104,7 @@ export default function ClientDetailScreen({ route, navigation }) {
             </TouchableOpacity>
       ),
     });
-  }, [navigation, editing, saving, draft]);
+  }, [navigation, editing, saving, draft, canAdjust]);
 
   const handleSave = useCallback(async () => {
     if (!draft || saving) return;
