@@ -9,12 +9,12 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 
 | # | Item | Status | Evidence |
 |---|------|--------|----------|
-| 1 | Fresh user (what SIWA creates) gets a real screen, not a hollow shell | ✅ VALIDATED | `TenantGate` + `AccessPendingScreen` added at the root (after kiosk branches). Decision table unit-tested: `src/lib/tenantGate.test.js` — mobile suite green. Maestro flow 1 drives the full UI path on the iPad Air sim: email sign-in with a zero-membership account → "Almost there / isn't linked to a salon yet" screen → Sign out returns to AuthScreen (screenshots `shot-1-pending`, `shot-2-signedout`). |
+| 1 | Fresh user (what SIWA creates) gets a real, fully-explorable screen — not a hollow shell | ✅ VALIDATED (upgraded 2026-07-26) | A zero-membership account is now **auto-placed into a read-only demo salon** (Demo tour ribbon) as soon as sign-in completes — `getMyTenants` returns the `demo` tenant for members-of-nothing when `tenants/demo.visitorMode==true` (live-probed in prod: fresh account → `[{id:'demo',role:'visitor'}]`). The `AccessPendingScreen` (with an "Explore the demo salon" button) is now the FAILURE-only fallback. Server-enforced read-only via Firestore rules (`isDemoVisitor`, 42 emulator assertions). Build #8 EMBEDS this (no OTA-timing dependency — see item 23). |
 | 2 | Existing staff regress nothing | ✅ VALIDATED | Gate passes instantly on a persisted tenant (`hasStoredTenant()` short-circuit — zero added latency/network); transiently-failing membership checks never lock out stored users (unit-tested). Kiosk custom-token identities never mount the gate (routed earlier in `App.jsx`). |
 | 3 | Demo (reviewer) credentials are typeable in the app | ✅ VALIDATED | Email/password form exists on AuthScreen (`signInWithEmailAndPassword`, shipped in #512) — flow 2 types credentials end-to-end on the sim. |
 | 4 | Demo account signs in by password + lands in a working app | ✅ VALIDATED (proxy) | `app-review-demo` (appreview@plumenexus.test): password provider, not disabled, emailVerified, member of `tenants/demo` **adminEmails + staffEmails** (admin-SDK read, 2026-07-23). Maestro flow 2 signs in an identically-shaped demo admin and reaches the app (screenshot `shot-3-demo-admin`). |
 | 5 | The password in the ASC review notes matches the account | 🔶 HUMAN-REQUIRED | Cannot be read back from Firebase. **Jonathan:** confirm the password in App Store Connect → App Review Information, or ask to rotate it and update the notes. |
-| 6 | Sign in with Apple native sheet completes on a physical device | ❌ **FAILED on device (2026-07-23)** — root-cause found | Jonathan's walkthrough: sheet errors "Sign Up Not Completed" **before app code runs** — same failure the reviewer hit. Evidence gathered after: the rejected build-6 IPA **is** signed with the SIWA entitlement (codesign read), signed by team **WX8JJUUYSR**; but the Firebase Apple provider is configured with team **7768658CR9** + Services ID `app.plumenexus.signin` (old JVK-era config, never migrated). Portal state of the NEW team's App ID is **not machine-checkable** (no ASC API key on this machine). See "Correction & re-grade" below. |
+| 6 | Sign in with Apple native sheet completes on a physical device | ✅ **RESOLVED + device-proven (2026-07-23/26)** | Root cause was the Firebase Apple provider pointing at the OLD team (`7768658CR9`) while the binary is signed by `WX8JJUUYSR`. FIX: Jonathan registered a SIWA key (`8JKG93T89G`) + Services ID under team WX8JJUUYSR; the Firebase Apple provider trio was re-pointed (clientId `com.plumenexus.salon.signin`, team `WX8JJUUYSR`, key `8JKG93T89G`, atomic PATCH + read-back). **Device-proven:** Jonathan's fresh Apple ID (`jonathan_vankim@yahoo.com`) completed the SIWA sheet end-to-end into app code and reached the access screen — the sheet no longer errors. See re-graded chain below. |
 
 ## Guideline 2.5.4 — bluetooth-central
 
@@ -35,10 +35,11 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 
 ## Before `eas submit` (hard gate — all must be checked)
 
-- [ ] Items 5 + 6 executed by Jonathan on a physical device (fresh Apple ID + exact ASC-notes creds).
-- [ ] Reply drafted in ASC to both guideline items: 2.1(a) — fresh accounts now land on an access screen; demo creds path re-verified. 2.5.4 — background mode removed.
-- [ ] Build number bumped by EAS remote versioning (automatic) — verify in the build page before submitting.
-- [ ] Review notes updated: demo account + note that staff accounts are provisioned by a salon admin.
+- [ ] Item 5 (ASC-notes password matches) confirmed by Jonathan; item 6 (SIWA) device-proven ✅ — re-verify once more on **build #8** specifically.
+- [ ] Device-test build #8: fresh Apple ID → lands in the read-only demo salon (Demo tour ribbon); demo ADMIN creds → full Demo Studio.
+- [ ] Reply pasted in ASC (see "Corrected 2.1(a) reply" below): 2.1(a) — fresh accounts are auto-placed into a read-only demo salon; staff provisioned by a salon admin; demo ADMIN creds in notes. 2.5.4 — background mode removed.
+- [ ] Build number bumped by EAS remote versioning (automatic, → build #8) — verify on the build page before submitting.
+- [ ] Review notes updated: demo ADMIN account + auto-place demo landing + staff provisioned by a salon admin.
 
 ## Additional sweeps (validated 2026-07-23)
 
@@ -54,7 +55,23 @@ Rule (from the post-mortem): every item is **VALIDATED** with recorded evidence,
 | 21 | No-IAP rationale (3.1.1) | ✅ DOCUMENTED | All payments are for real-world salon services/goods (Stripe) — outside IAP per 3.1.3(e)/physical-goods carve-out. No digital content is sold. |
 | 22 | SIWA button prominence (4.8) | ✅ VALIDATED | Boot screenshot: Apple button equal width/position directly below Google. |
 
+## Demo-tour completeness (added 2026-07-26 — the resubmission's core 2.1 story)
+
+| # | Item | Status | Evidence |
+|---|------|--------|----------|
+| 23 | Reviewer actually SEES the demo on first launch (no OTA-timing gap) | ✅ VALIDATED | Build **#8** (from `main` @ `6e4513a`) EMBEDS the demo-tour JS (#546/#547) — a fresh install shows the demo on first cold launch, not on the 2nd. (Build #7/7fb55786 predated the demo tour and depended on an OTA that only applies on the 2nd launch — that gap is closed by rebuilding.) Channel `production-salon`, runtime 1.0.0, team WX8JJUUYSR — all match. |
+| 24 | Demo is read-only, server-enforced (not a UI gate) | ✅ VALIDATED | Firestore rules `isDemoVisitor` helper on read-lines only; 42 emulator assertions (visitor reads-yes / writes-no / other tenants isolated / PII denied); live-prod probe with a throwaway visitor token: demo reads 200, writes+PII+cross-tenant 403 (8/8). |
+| 25 | No visitor UX dead-ends (2.1 completeness) | ✅ VALIDATED | #548: mobile now honors the server `VISITOR_CAPS` — visitor sees only the read-only showcase tiles (Schedule/Clients/Reports/Employees/Meetings/Memberships), Client Edit hidden, Schedule views the full calendar with all create/＋ affordances gated, phone-signin hidden, Earnings tile routed to Dashboard (was a dead route for everyone). 3 new visitor unit tests; mobile suite 58 green. |
+| 26 | No real-person PII in the demo (5.1.1 / 5.2.5 likeness) | ✅ VALIDATED | 500 celebrity clients renamed to fictional people + all denormalized refs (receipts/appointments/ledger/etc); 11 real staff (10 Meraki techs + owner) + 3 real IG handles fictionalized; 500 client emails → reserved `@example.com`. Word-boundary re-scan across all 31 demo collections: **0** real names / handles / `@email.com` left. Objectionable-content + placeholder scans clean. |
+| 27 | Reviewer can't trigger real external sends from the demo | ✅ (Stripe/SMS) / ⚠ (email — mitigated) | Stripe fully sandboxed (`stripeSandboxMode:true` + sk_test); SMS fully sandboxed. Email: a code bug (`deliverReceiptEmail` omits tenantId → skips the email sandbox) means a demo checkout/resend CAN dispatch real SES — but demo recipients are now all `@example.com` (RFC-reserved, non-deliverable), so nothing reaches a real inbox. Code fix (forward tenantId) tracked separately. |
+
 **ASC-side items (human, in App Store Connect):** privacy nutrition labels accuracy, age rating, screenshots, review notes text — not inspectable from the repo.
+
+## Corrected 2.1(a) reply (paste into ASC review response)
+
+> Thank you for the re-review. We have removed the sign-in dead end. Any brand-new account that is not yet linked to a salon is now automatically placed into a read-only demo salon (shown with a "Demo tour" banner) the moment Sign in with Apple or Google completes — so the app is fully explorable with no invitation required. Staff accounts are provisioned by a salon owner/admin from within the app; to review the full staff and admin experience, sign in with the demo administrator email and password included in the App Review Information notes. We also resolved the Sign in with Apple sheet failure (a provider-configuration mismatch on our end) and verified the flow completes on a physical device.
+
+**2.5.4 reply:** > The `bluetooth-central` background mode has been removed. Bluetooth is now used only in the foreground to connect to an in-person card reader (Stripe Terminal); the app declares no background modes.
 
 ## Correction & re-grade (2026-07-23, after the device walkthrough failed)
 
@@ -68,13 +85,8 @@ An earlier revision said "the Firebase side is validated." That was an **overcla
 |---|---|---|
 | SIWA entitlement in the SHIPPED binary | **L3** | Present in build-6 IPA (codesign), team `WX8JJUUYSR` |
 | Firebase Apple provider enabled | L1 | Enabled (Identity Toolkit read) |
-| Provider config CONSISTENT with signing team | **❌ L2 FAIL** | Provider: team `7768658CR9`, key `Q8C4H35XLG`, Services ID `app.plumenexus.signin` (old team) vs app signed by `WX8JJUUYSR` |
-| Services ID validity at Apple | L2 | Live client (authorize-endpoint probe) — but bound to the old team |
-| New team's App ID SIWA capability state | **UNVERIFIABLE from machine** | No ASC API key locally. HUMAN: portal check (Identifiers → com.plumenexus.salon → Sign In with Apple → Configure/Save), or create an ASC API key so this becomes machine-checkable permanently |
-| Native sheet completes on device | **❌ L3 FAIL** | "Sign Up Not Completed" (Jonathan + reviewer) |
+| Provider config CONSISTENT with signing team | ✅ **L2 RESOLVED** | Provider re-pointed: clientId `com.plumenexus.salon.signin`, team `WX8JJUUYSR`, key `8JKG93T89G` (atomic PATCH + read-back). Matches the signing team. |
+| Services ID validity at Apple | ✅ L2 | Services ID + SIWA key registered under WX8JJUUYSR (Jonathan, portal). |
+| Native sheet completes on device | ✅ **L3 PASS** | Jonathan's fresh Apple ID completed the sheet into app code (reached the access screen) — 2026-07-23. |
 
-**New hard blockers before rebuild/resubmit:**
-1. (HUMAN) Portal, team WX8JJUUYSR: App ID `com.plumenexus.salon` → Sign In with Apple → Configure/Save as primary; create a SIWA key (.p8 + Key ID) under this team.
-2. (CLAUDE, after #1) Re-point the Firebase Apple provider to the new team/key via the Identity Toolkit admin API.
-3. (HUMAN) Re-run the device sheet test on build 6 — must complete into the app (then show the access-pending screen from this PR's fix).
-4. (Optional, recommended) Create an App Store Connect API key so App ID capability state is machine-verifiable in every future submission check.
+**Status (2026-07-26): all SIWA blockers RESOLVED.** The provider trio is consistent with the signing team and the sheet is device-proven. Remaining human step: re-confirm on **build #8** specifically before Submit-for-Review (device walkthrough in the "Before eas submit" gate above).
