@@ -59,12 +59,12 @@ const DEFAULT_TEAM = [
 ];
 
 const DEFAULT_SERVICES_FALLBACK = [
-  { name: 'Gel‑X',              priceFrom: 70, durationMin: 60, meta: 'Soft gel tips', desc: 'Lightweight soft‑gel extensions in any length or shape, sculpted around the natural nail. Our most requested set for nail art.' },
-  { name: 'Signature Manicure', priceFrom: 32, durationMin: 35, meta: 'Spa ritual',    desc: 'Steam, soak, exfoliation, cuticle care, hydrating hand massage. A weekly ritual that leaves your hands rested.' },
-  { name: 'Structured Gel',     priceFrom: 50, durationMin: 60, meta: 'Builder gel',   desc: 'Reinforces the natural nail with a builder‑gel base. For short to medium lengths that want strength without extensions.' },
-  { name: 'Signature Pedicure', priceFrom: 52, durationMin: 45, meta: 'Spa ritual',    desc: 'Steam, callus removal, sugar scrub, mud mask, and hot towels. Our most asked‑for pedicure, year‑round.' },
-  { name: 'Deluxe Pedicure',    priceFrom: 65, durationMin: 60, meta: 'Hot stone',     desc: 'A longer ritual with hot stone massage and full lower‑leg treatment. A small luxury after a long week.' },
-  { name: 'Custom Nail Art',    priceFrom: 15, durationMin: 10, meta: 'Per nail',      desc: 'Free‑hand chrome, florals, French variations, and custom requests. Bring a reference or trust the artist.' },
+  { name: 'Gel‑X',              price: 70, showFrom: true, durationMin: 60, meta: 'Soft gel tips', desc: 'Lightweight soft‑gel extensions in any length or shape, sculpted around the natural nail. Our most requested set for nail art.' },
+  { name: 'Signature Manicure', price: 32, showFrom: true, durationMin: 35, meta: 'Spa ritual',    desc: 'Steam, soak, exfoliation, cuticle care, hydrating hand massage. A weekly ritual that leaves your hands rested.' },
+  { name: 'Structured Gel',     price: 50, showFrom: true, durationMin: 60, meta: 'Builder gel',   desc: 'Reinforces the natural nail with a builder‑gel base. For short to medium lengths that want strength without extensions.' },
+  { name: 'Signature Pedicure', price: 52, showFrom: true, durationMin: 45, meta: 'Spa ritual',    desc: 'Steam, callus removal, sugar scrub, mud mask, and hot towels. Our most asked‑for pedicure, year‑round.' },
+  { name: 'Deluxe Pedicure',    price: 65, showFrom: true, durationMin: 60, meta: 'Hot stone',     desc: 'A longer ritual with hot stone massage and full lower‑leg treatment. A small luxury after a long week.' },
+  { name: 'Custom Nail Art',    price: 15, showFrom: true, durationMin: 10, meta: 'Per nail',      desc: 'Free‑hand chrome, florals, French variations, and custom requests. Bring a reference or trust the artist.' },
 ];
 
 const DEFAULT_HOURS = [
@@ -157,13 +157,27 @@ export default function HeroMerakiSite({ webCfg, onSignIn }) {
   useEffect(() => {
     fetchServices().then(svc => {
       if (!svc || !svc.length) return;
+      // The "from" price = the lowest a guest could actually pay: the service's
+      // basePrice, or the cheapest option when it has variants. NOTE: `priceFrom`
+      // on the service doc is a BOOLEAN flag ("prices start from"), NOT a number —
+      // the real amount lives in basePrice / options[].price. Reading it here is
+      // what makes the menu price show up and stay in sync with the services menu.
+      const startPrice = (s) => {
+        const base = Number(s.basePrice ?? s.price ?? 0) || 0;
+        const opts = Array.isArray(s.options)
+          ? s.options.map(o => (o.price != null ? Number(o.price) : base + Number(o.priceAdd || 0))).filter(p => p > 0)
+          : [];
+        const lo = opts.length ? Math.min(...(base > 0 ? [base, ...opts] : opts)) : base;
+        return Number.isFinite(lo) ? lo : 0;
+      };
       const sorted = [...svc]
         .filter(s => s.active !== false)
-        .sort((a, b) => (b.priceFrom || b.price || 0) - (a.priceFrom || a.price || 0))
+        .sort((a, b) => startPrice(b) - startPrice(a))
         .slice(0, 6)
         .map(s => ({
           name: s.name,
-          priceFrom: s.priceFrom || s.price || 0,
+          price: startPrice(s),
+          showFrom: !!s.priceFrom || (Array.isArray(s.options) && s.options.length > 1),
           durationMin: s.duration || s.durationMin || 30,
           meta: s.category || '',
           desc: s.description || '',
@@ -472,7 +486,7 @@ function Services({ veryNarrow, services, intro }) {
   );
 }
 
-function ServiceCard({ name, priceFrom, durationMin, meta, desc }) {
+function ServiceCard({ name, price, showFrom, durationMin, meta, desc }) {
   const [hover, setHover] = useState(false);
   return (
     <article
@@ -484,10 +498,13 @@ function ServiceCard({ name, priceFrom, durationMin, meta, desc }) {
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16,
         paddingBottom: 14, borderBottom: `1px solid ${RULE}`,
       }}>
-        <span>{name}</span>
-        <span style={{ fontFamily: FONT_DISPLAY, fontSize: 11, letterSpacing: '.2em', color: GOLD, whiteSpace: 'nowrap' }}>
-          FROM ${priceFrom}
-        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>{name}</span>
+        {price > 0 && (
+          <span style={{ whiteSpace: 'nowrap', color: GOLD, display: 'inline-flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+            {showFrom && <span style={{ fontFamily: FONT_DISPLAY, fontSize: 9.5, letterSpacing: '.24em', textTransform: 'uppercase', opacity: 0.65 }}>From</span>}
+            <span style={{ fontFamily: FONT_SERIF, fontSize: 20, fontWeight: 400 }}>${price}</span>
+          </span>
+        )}
       </div>
       <div style={{ fontFamily: FONT_DISPLAY, fontSize: 10, letterSpacing: '.32em', textTransform: 'uppercase', color: INK_FAINT }}>
         {durationMin}+ min{meta ? ` · ${meta}` : ''}
