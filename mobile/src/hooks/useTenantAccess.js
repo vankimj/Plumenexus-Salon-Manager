@@ -73,6 +73,11 @@ export default function useTenantAccess() {
   const realTechName   = granular?.techName || null;
   const scheduleAccess = granular?.scheduleAccess || 'edit';
   const plan           = coarse?.plan || null;
+  // Server-resolved capability list (getMyTenantRole). For the demo 'visitor'
+  // pseudo-role this is VISITOR_CAPS — the read-only tiles the tour should show.
+  // Consumed by getVisibleModules so a visitor sees exactly those, not the
+  // legacy adminOnly fallback set (which surfaced write-only tiles).
+  const caps      = Array.isArray(granular?.caps) ? granular.caps : null;
 
   // "Preview as [role]" (admin-only, client-side): when a real admin has picked
   // a role to preview, report THAT role + isAdmin:false so the whole app renders
@@ -84,9 +89,13 @@ export default function useTenantAccess() {
   const canEditSchedule = previewing
     ? previewing.role !== 'readonly'
     : (realIsAdmin || ((realRole === 'tech' || realRole === 'scheduler') && scheduleAccess !== 'view'));
+  // Demo-tenant read-only tour account (server pseudo-role). Never true under
+  // preview. Drives the read-only tile set + suppresses write affordances.
+  const isVisitor = !previewing && realRole === 'visitor';
 
   return {
     isAdmin, role, techName, scheduleAccess, plan, canEditSchedule, email, loading,
+    caps, isVisitor,
     isKioskSession: !!kiosk, kiosk,
     realIsAdmin, previewAs: previewing,
   };

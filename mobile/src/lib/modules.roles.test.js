@@ -46,3 +46,26 @@ describe('getVisibleModules — mobile role gating', () => {
     expect(v).toContain('reports');          // adminOnly:false → still shown without a role
   });
 });
+
+describe('getVisibleModules — demo visitor (server caps)', () => {
+  // The demo 'visitor' pseudo-role isn't in the rbac matrix, so `known` is
+  // false. Before the fix it fell to the adminOnly fallback and showed the
+  // wrong tiles. With server-resolved caps it must show EXACTLY the read-only
+  // showcase and NONE of the write-only tiles that error for a read-only user.
+  const VISITOR_CAPS = ['schedule', 'schedule_all', 'clients', 'reports', 'earnings_all', 'employees', 'memberships', 'meetings', 'programs', 'store'];
+  const vis = getVisibleModules({ plan: 'pro' }, { isAdmin: false, role: 'visitor', caps: VISITOR_CAPS }).map(m => m.id);
+
+  it('shows the intended read-only tiles', () => {
+    expect(vis).toEqual(expect.arrayContaining(['schedule', 'clients', 'reports', 'employees', 'meetings', 'memberships']));
+  });
+  it('hides every write-oriented tile a visitor would only error on', () => {
+    for (const id of ['services', 'walkin', 'chat', 'marketing', 'hr', 'giftcards', 'products', 'attendance', 'earnings']) {
+      expect(vis).not.toContain(id);
+    }
+  });
+  it('without caps, an unknown role still uses the legacy adminOnly fallback', () => {
+    const v = getVisibleModules({ plan: 'pro' }, { isAdmin: false, role: 'visitor' }).map(m => m.id);
+    expect(v).toContain('schedule'); // non-adminOnly tiles still show (unchanged legacy behavior)
+    expect(v).not.toContain('employees'); // adminOnly hidden
+  });
+});
