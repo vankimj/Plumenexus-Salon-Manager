@@ -13,8 +13,6 @@ import { fetchLogs, fetchEmployees, createEmployee, saveEmployee,
          fetchWebfrontConfig, saveWebfrontConfig,
          fetchReviewReceived, fetchReviewRequests,
          saveReviewReceived, findBusinessByAddress,
-         subscribeGoogleBusinessAuth, startGoogleBusinessAuth,
-         syncGoogleBusinessReviews, disconnectGoogleBusiness,
          subscribeGoogleReviews, subscribeCheckoutSession, clearCheckoutSession } from '../../lib/firestore';
 import { ASSIGNMENT_METHODS, ASSIGNMENT_METHOD_LABELS, ASSIGNMENT_METHOD_DESCRIPTIONS, DEFAULT_ASSIGNMENT_METHOD } from '../../lib/techAssignment';
 import { FLOW_TEMPLATES, FLOW_DEFAULTS, getEffectiveFlow } from '../../lib/bookingFlow';
@@ -2329,63 +2327,9 @@ function WebfrontTab({ cfg, setCfg, employees }) {
   const [detecting,    setDetecting]    = useState(false);
   const [detectMsg,    setDetectMsg]    = useState(null);
   const [candidates,   setCandidates]   = useState(null);
-  const [gbpAuth,      setGbpAuth]      = useState(null);
-  const [gbpConnecting,setGbpConnecting]= useState(false);
-  const [gbpSyncing,   setGbpSyncing]   = useState(false);
-  const [gbpMsg,       setGbpMsg]       = useState(null);
   const [gReviews,     setGReviews]     = useState(null);
 
-  useEffect(() => {
-    const unsub = subscribeGoogleBusinessAuth(setGbpAuth);
-    return unsub;
-  }, []);
-
   useEffect(() => subscribeGoogleReviews(setGReviews), []);
-
-  useEffect(() => {
-    function onMessage(e) {
-      if (e.data?.type === 'google-business-auth') {
-        setGbpConnecting(false);
-        setGbpMsg(e.data.ok ? '✓ Connected — reviews will sync automatically.' : '✗ Connection failed.');
-      }
-    }
-    window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
-  }, []);
-
-  async function handleConnectGbp() {
-    setGbpMsg(null);
-    setGbpConnecting(true);
-    try {
-      const { authUrl } = await startGoogleBusinessAuth();
-      const w = window.open(authUrl, 'gbp-auth', 'width=540,height=720');
-      if (!w) { setGbpMsg('✗ Popup blocked. Allow popups and try again.'); setGbpConnecting(false); }
-    } catch (e) {
-      setGbpMsg('✗ ' + (e.message || 'Connect failed'));
-      setGbpConnecting(false);
-    }
-  }
-  async function handleSyncGbp() {
-    setGbpMsg(null);
-    setGbpSyncing(true);
-    try {
-      const result = await syncGoogleBusinessReviews();
-      setGbpMsg(`✓ Synced ${result?.written ?? 0} reviews from Google.`);
-    } catch (e) {
-      setGbpMsg('✗ ' + (e.message || 'Sync failed'));
-    }
-    setGbpSyncing(false);
-  }
-  async function handleDisconnectGbp() {
-    if (!confirm('Disconnect Google Business Profile? Reviews already synced will remain in the database.')) return;
-    setGbpMsg(null);
-    try {
-      await disconnectGoogleBusiness();
-      setGbpMsg('✓ Disconnected.');
-    } catch (e) {
-      setGbpMsg('✗ ' + (e.message || 'Disconnect failed'));
-    }
-  }
 
   useEffect(() => {
     fetchReviewReceived().then(setReviews).catch(() => setReviews([]));
