@@ -559,6 +559,57 @@ export default function SalonWebfront() {
 
       {/* ── Reviews ── */}
       {cfg.showReviews && (() => {
+        // Multi-location: render one reviews block per Google location.
+        const gLocs = (googleData?.locations || []).filter(l => (l.reviews || []).some(r => r && r.text));
+        if (gLocs.length > 1) {
+          return (
+            <section id="reviews" style={{ padding:'clamp(64px,10vw,96px) clamp(20px,6vw,80px)', background: bgs.revs }}>
+              <div style={{ maxWidth: isMinimal ? 700 : 1080, margin:'0 auto' }}>
+                <div style={{ textAlign:'center', marginBottom:48 }}>
+                  <EyebrowLabel tm={tm}>Happy Clients</EyebrowLabel>
+                  <h2 style={{ fontSize:'clamp(28px,4vw,38px)', fontWeight:800, color:tm.dark, marginTop:10 }}>What People Are Saying</h2>
+                </div>
+                {gLocs.map((loc, li) => {
+                  const revs = (loc.reviews || []).filter(r => r.text);
+                  return (
+                    <div key={loc.locationName || li} style={{ marginBottom: li < gLocs.length - 1 ? 52 : 0 }}>
+                      <div style={{ textAlign:'center', marginBottom:24 }}>
+                        <h3 style={{ fontSize:'clamp(19px,2.6vw,26px)', fontWeight:800, color:tm.dark }}>{loc.locationTitle || 'Our Location'}</h3>
+                        {loc.rating ? (
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:10, marginTop:12 }}>
+                            <div style={{ display:'flex', gap:3 }}>
+                              {[1,2,3,4,5].map(n => (
+                                <svg key={n} width={20} height={20} viewBox="0 0 24 24" fill={n <= Math.round(loc.rating) ? '#f59e0b' : '#e0e0e0'}><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                              ))}
+                            </div>
+                            <span style={{ fontSize:20, fontWeight:800, color:tm.dark }}>{Number(loc.rating).toFixed(1)}</span>
+                            {loc.userRatingCount ? <span style={{ fontSize:13, color:'#718096' }}>({Number(loc.userRatingCount).toLocaleString()} reviews)</span> : null}
+                            <div style={{ display:'flex', alignItems:'center', gap:5, background:'#fff', border:'1px solid #e0e0e0', borderRadius:20, padding:'4px 12px' }}>
+                              <GoogleGLogo size={16} />
+                              <span style={{ fontSize:12, fontWeight:600, color:'#555' }}>Google</span>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns: isMinimal ? '1fr' : 'repeat(auto-fill,minmax(280px,1fr))', gap:20 }}>
+                        {revs.map((r, i) => <ReviewCard key={i} review={r} isGoogle={true} googleReviewUrl={cfg.googleReviewUrl} tm={tm} />)}
+                      </div>
+                    </div>
+                  );
+                })}
+                {cfg.googleReviewUrl && (
+                  <div style={{ textAlign:'center', marginTop:40 }}>
+                    <a href={normURL(cfg.googleReviewUrl)} target="_blank" rel="noopener noreferrer"
+                      style={{ display:'inline-flex', alignItems:'center', gap:8, height:48, borderRadius:24, background:'#fff', color:'#333', fontSize:14, fontWeight:600, padding:'0 28px', textDecoration:'none', border:'1.5px solid #e0e0e0', boxShadow:'0 2px 8px rgba(0,0,0,.07)' }}>
+                      <GoogleGLogo size={18} /> See all Google reviews ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        }
+
         const gReviews   = googleData?.reviews?.filter(r => r.text) || [];
         const manualRevs = cfg.testimonials || [];
         const displayRevs = gReviews.length ? gReviews : manualRevs;

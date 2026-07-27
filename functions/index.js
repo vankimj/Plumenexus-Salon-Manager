@@ -18,6 +18,7 @@ const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notifi
 const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
 const phoneAuth = require('./lib/phoneAuth');
 const { parseStaffResponse } = require('./lib/staffImport');
+const gbpMatch = require('./gbpMatch');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -7465,13 +7466,15 @@ exports.refreshGoogleReviews = onCall(async (request) => {
   }));
 
   const db = getFirestore();
+  // merge:true so a Places refresh (single-location, non-GBP path) never wipes
+  // the per-location `locations[]` summaries written by the GBP review sync.
   await db.doc(`tenants/${tenantId}/data/googleReviews`).set({
     placeId,
     reviews,
     rating:          data.rating          || null,
     userRatingCount: data.userRatingCount || null,
     refreshedAt:     new Date().toISOString(),
-  });
+  }, { merge: true });
 
   console.log(`[GoogleReviews] Cached ${reviews.length} reviews · rating ${data.rating} (${data.userRatingCount} total)`);
   return { count: reviews.length, rating: data.rating, total: data.userRatingCount };
@@ -17305,37 +17308,54 @@ exports.googleBusinessAuthCallback = onRequest(
       return respondHtml('Network error', '<h1>✗ Could not reach Google</h1>', '#b91c1c');
     }
 
-    // Resolve account + location.
-    let accountName = '';
-    let locationName = '';
-    let locationTitle = '';
+    // Resolve ALL accounts × ALL locations. One Google login can manage many
+    // listings (the normal multi-location model), so enumerate every one — the
+    // tenant maps each to an app location later; auto-map is a best-effort
+    // default they can override.
+    const gbpLocations = [];
     try {
-      const accountsRes = await fetch(ACCOUNTS_API, {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      });
-      const accountsData = await accountsRes.json();
-      const firstAcct = (accountsData.accounts || [])[0];
-      if (!firstAcct?.name) {
-        return respondHtml('No Business accounts', '<h1>✗ No Business Profile accounts</h1><p>The Google account you used doesn\'t manage any Business Profiles. Sign in as the owner of the Meraki listing.</p>', '#b91c1c');
+      const accounts = [];
+      let acctPage = '';
+      for (let p = 0; p < 20; p++) {
+        const u = new URL(ACCOUNTS_API);
+        if (acctPage) u.searchParams.set('pageToken', acctPage);
+        const accountsRes = await fetch(u.toString(), { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+        const accountsData = await accountsRes.json();
+        if (accountsData.error) throw new Error(accountsData.error.message || accountsData.error.status || 'accounts.list failed');
+        for (const a of (accountsData.accounts || [])) if (a?.name) accounts.push(a.name);
+        if (!accountsData.nextPageToken) break;
+        acctPage = accountsData.nextPageToken;
       }
-      accountName = firstAcct.name; // "accounts/12345"
-
-      const locsRes = await fetch(`${LOCATIONS_API_BASE}/${accountName}/locations?readMask=name,title`, {
-        headers: { Authorization: `Bearer ${tokens.access_token}` },
-      });
-      const locsData = await locsRes.json();
-      const firstLoc = (locsData.locations || [])[0];
-      if (!firstLoc?.name) {
-        return respondHtml('No locations', '<h1>✗ No locations found</h1><p>This Business Profile has no managed locations.</p>', '#b91c1c');
+      if (accounts.length === 0) {
+        return respondHtml('No Business accounts', '<h1>✗ No Business Profile accounts</h1><p>The Google account you used doesn\'t manage any Business Profiles. Sign in as the owner of the listing.</p>', '#b91c1c');
       }
-      locationName  = firstLoc.name;   // "locations/67890"
-      locationTitle = firstLoc.title || '';
+      for (const acct of accounts) {
+        let locPage = '';
+        for (let p = 0; p < 20; p++) {
+          const u = new URL(`${LOCATIONS_API_BASE}/${acct}/locations`);
+          u.searchParams.set('readMask', 'name,title,storefrontAddress');
+          u.searchParams.set('pageSize', '100');
+          if (locPage) u.searchParams.set('pageToken', locPage);
+          const locsRes = await fetch(u.toString(), { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+          const locsData = await locsRes.json();
+          if (locsData.error) throw new Error(locsData.error.message || locsData.error.status || 'locations.list failed');
+          for (const loc of (locsData.locations || [])) {
+            if (!loc?.name) continue;
+            gbpLocations.push({ accountName: acct, locationName: loc.name, locationTitle: loc.title || '', storefrontAddress: loc.storefrontAddress || null });
+          }
+          if (!locsData.nextPageToken) break;
+          locPage = locsData.nextPageToken;
+        }
+      }
     } catch (e) {
       console.error('[googleBusinessAuthCallback] account/location lookup failed', e);
       return respondHtml('Lookup failed', '<h1>✗ Could not resolve Business Profile</h1>', '#b91c1c');
     }
+    if (gbpLocations.length === 0) {
+      return respondHtml('No locations', '<h1>✗ No locations found</h1><p>This Business Profile has no managed locations.</p>', '#b91c1c');
+    }
 
-    // Encrypt + store refresh token.
+    // Encrypt the refresh token once — every location from THIS login shares it.
     let encryptedToken;
     try {
       encryptedToken = await kmsEncrypt(tokens.refresh_token);
@@ -17344,20 +17364,50 @@ exports.googleBusinessAuthCallback = onRequest(
       return respondHtml('Encryption failed', '<h1>✗ Token encryption failed</h1><p>Cloud KMS is not configured. See setup doc step 4.</p>', '#b91c1c');
     }
 
-    await db.doc(`tenants/${tenantId}/data/googleBusinessAuth`).set({
+    // Auto-map each Google location to an app location (best-effort default),
+    // then merge into any existing connection: re-authing with a DIFFERENT
+    // Google login appends its listings and never clobbers a manual mapping.
+    const locState = await loadTenantLocations(db, tenantId);
+    const nowIso = new Date().toISOString();
+    const incoming = gbpLocations.map(g => ({
+      accountName:     g.accountName,
+      locationName:    g.locationName,
+      locationTitle:   g.locationTitle,
+      appLocationId:   gbpMatch.autoMapAppLocation(g, locState),
       refreshTokenEnc: encryptedToken,
-      accountName,
-      locationName,
-      locationTitle,
-      connectedAt:     new Date().toISOString(),
-      connectedBy:     stored.initiator || '',
+      active:          true,
       lastSyncAt:      null,
       lastSyncCount:   0,
       lastSyncError:   null,
-    });
+    }));
 
-    console.log(`[googleBusinessAuthCallback] tenant=${tenantId} connected ${locationName} (${locationTitle})`);
-    respondHtml('Connected', `<h1>✓ Connected!</h1><p><strong>${locationTitle || locationName}</strong></p><p>You can close this window. Reviews will start syncing automatically.</p>`);
+    const existingSnap = await db.doc(`tenants/${tenantId}/data/googleBusinessAuth`).get();
+    const existingData = existingSnap.exists ? existingSnap.data() : null;
+    const existingEntries = Array.isArray(existingData?.locations)
+      ? existingData.locations
+      : gbpMatch.synthEntryFromLegacy(existingData);
+    const merged  = gbpMatch.mergeLocationsByName(existingEntries, incoming);
+    const primary = merged[0];
+
+    await db.doc(`tenants/${tenantId}/data/googleBusinessAuth`).set({
+      // Top-level fields mirror locations[0]. Kept for back-compat AND because
+      // the nightly cron discovers connected tenants via a collectionGroup query
+      // on `refreshTokenEnc` — it must stay populated while any location is linked.
+      refreshTokenEnc: primary.refreshTokenEnc,
+      accountName:     primary.accountName,
+      locationName:    primary.locationName,
+      locationTitle:   primary.locationTitle,
+      locations:       merged,
+      connectedAt:     existingData?.connectedAt || nowIso,
+      connectedBy:     stored.initiator || existingData?.connectedBy || '',
+      lastSyncAt:      existingData?.lastSyncAt || null,
+      lastSyncCount:   existingData?.lastSyncCount || 0,
+      lastSyncError:   null,
+    }, { merge: true });
+
+    const count = merged.length;
+    console.log(`[googleBusinessAuthCallback] tenant=${tenantId} connected ${count} location(s)`);
+    respondHtml('Connected', `<h1>✓ Connected!</h1><p><strong>${count} location${count === 1 ? '' : 's'}</strong> linked</p><p>You can close this window. Reviews will start syncing automatically.</p>`);
   }
 );
 
@@ -17383,72 +17433,185 @@ async function fetchFreshAccessToken(refreshToken) {
   return data.access_token;
 }
 
-async function pullAllReviewsForTenant(tenantId) {
+// Publish per-location review summaries to the PUBLIC data/googleReviews doc
+// (read by the webfront). Merges the freshly-synced locations into any existing
+// summaries (so a single-location re-sync doesn't drop the others), and mirrors
+// the primary location to the top-level fields existing readers already use.
+async function writePublicReviewSummaries(db, tenantId, auth, perLocation) {
+  const authEntries = Array.isArray(auth.locations) && auth.locations.length
+    ? auth.locations
+    : gbpMatch.synthEntryFromLegacy(auth);
+  const titleByName = new Map(authEntries.map(e => [e.locationName, e.locationTitle || '']));
+  const nowIso = new Date().toISOString();
+  const fresh = perLocation
+    .filter(r => !r.error)
+    .map(r => ({
+      appLocationId:   r.appLocationId != null ? r.appLocationId : null,
+      locationName:    r.locationName,
+      locationTitle:   titleByName.get(r.locationName) || '',
+      rating:          r.rating != null ? r.rating : null,
+      userRatingCount: r.count != null ? r.count : (r.publicReviews ? r.publicReviews.length : 0),
+      reviews:         r.publicReviews || [],
+      refreshedAt:     nowIso,
+    }));
+  if (fresh.length === 0) return;
+
+  const ref = db.doc(`tenants/${tenantId}/data/googleReviews`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists ? snap.data() : {};
+    const byName = new Map((Array.isArray(cur.locations) ? cur.locations : []).map(s => [s.locationName, s]));
+    for (const s of fresh) byName.set(s.locationName, s);
+    // Order by the auth-entry order (primary first), then any leftovers.
+    const ordered = [];
+    for (const e of authEntries) {
+      if (byName.has(e.locationName)) { ordered.push(byName.get(e.locationName)); byName.delete(e.locationName); }
+    }
+    for (const s of byName.values()) ordered.push(s);
+    const primaryName = authEntries[0] && authEntries[0].locationName;
+    const primary = ordered.find(s => s.locationName === primaryName) || ordered[0];
+    tx.set(ref, {
+      reviews:         primary.reviews,
+      rating:          primary.rating,
+      userRatingCount: primary.userRatingCount,
+      refreshedAt:     nowIso,
+      source:          'gbp',
+      locations:       ordered,
+    }, { merge: true });
+  });
+}
+
+// Pull reviews for a tenant's connected Google location(s). Loops every active
+// location entry (or a single one via `onlyLocationName`), tags each review doc
+// with its location, records per-location + aggregate sync state, and refreshes
+// the public per-location summaries. Never throws for a merely-disconnected or
+// all-inactive doc — returns zero counts — so the nightly cron can't crash.
+async function pullAllReviewsForTenant(tenantId, { onlyLocationName } = {}) {
   const db = getFirestore();
-  const authSnap = await db.doc(`tenants/${tenantId}/data/googleBusinessAuth`).get();
+  const authRef = db.doc(`tenants/${tenantId}/data/googleBusinessAuth`);
+  const authSnap = await authRef.get();
   if (!authSnap.exists) {
     throw new HttpsError('failed-precondition', 'Google Business not connected for this tenant');
   }
   const auth = authSnap.data();
-  if (!auth.refreshTokenEnc || !auth.accountName || !auth.locationName) {
-    throw new HttpsError('failed-precondition', 'googleBusinessAuth doc incomplete');
+  let entries = Array.isArray(auth.locations) && auth.locations.length
+    ? auth.locations
+    : gbpMatch.synthEntryFromLegacy(auth);
+  entries = entries.filter(e => e && e.active !== false && e.locationName && e.accountName && (e.refreshTokenEnc || auth.refreshTokenEnc));
+  if (onlyLocationName) entries = entries.filter(e => e.locationName === onlyLocationName);
+  if (entries.length === 0) {
+    return { written: 0, total: 0, perLocation: [] };
   }
 
-  const refreshToken = await kmsDecrypt(auth.refreshTokenEnc);
-  const accessToken  = await fetchFreshAccessToken(refreshToken);
-
-  const reviews = [];
-  let pageToken = '';
-  for (let page = 0; page < 50; page++) { // hard cap: 50 × 50 = 2500 reviews
-    const url = new URL(`${REVIEWS_API_BASE}/${auth.accountName}/${auth.locationName}/reviews`);
-    url.searchParams.set('pageSize', '50');
-    if (pageToken) url.searchParams.set('pageToken', pageToken);
-    const r = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await r.json();
-    if (data.error) {
-      throw new HttpsError('internal', `Business Profile API: ${data.error.status || data.error.code} ${data.error.message || ''}`.trim());
-    }
-    for (const rv of (data.reviews || [])) reviews.push(rv);
-    if (!data.nextPageToken) break;
-    pageToken = data.nextPageToken;
-  }
-
-  // Write all reviews in batches of 400 (Firestore batch limit is 500).
-  const colRef = db.collection(`tenants/${tenantId}/googleReviewsLog`);
   const STAR = { STAR_RATING_UNSPECIFIED: 0, ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5 };
-  let written = 0;
-  for (let i = 0; i < reviews.length; i += 400) {
-    const batch = db.batch();
-    for (const rv of reviews.slice(i, i + 400)) {
-      const reviewId = (rv.reviewId || rv.name?.split('/').pop() || '').replace(/[^A-Za-z0-9_-]/g, '_');
-      if (!reviewId) continue;
-      batch.set(colRef.doc(reviewId), {
-        reviewId,
-        authorName:    rv.reviewer?.displayName  || 'Google Reviewer',
-        authorPhoto:   rv.reviewer?.profilePhotoUrl || null,
-        rating:        STAR[rv.starRating] || 0,
-        text:          rv.comment || '',
-        publishTime:   rv.createTime || null,
-        updateTime:    rv.updateTime || null,
-        replyText:     rv.reviewReply?.comment || null,
-        replyTime:     rv.reviewReply?.updateTime || null,
-        ingestedAt:    new Date().toISOString(),
-      }, { merge: true });
-      written++;
+  const perLocation = [];
+  const tokenCache = new Map(); // encrypted token -> access token (shared login exchanges once)
+
+  for (const entry of entries) {
+    const result = { locationName: entry.locationName, appLocationId: entry.appLocationId != null ? entry.appLocationId : null, written: 0, total: 0, error: null, rating: null, count: null, publicReviews: [] };
+    try {
+      const enc = entry.refreshTokenEnc || auth.refreshTokenEnc;
+      let accessToken = tokenCache.get(enc);
+      if (!accessToken) {
+        accessToken = await fetchFreshAccessToken(await kmsDecrypt(enc));
+        tokenCache.set(enc, accessToken);
+      }
+
+      const reviews = [];
+      let averageRating = null, totalReviewCount = null, pageToken = '';
+      for (let page = 0; page < 50; page++) { // hard cap: 50 × 50 = 2500 reviews
+        const url = new URL(`${REVIEWS_API_BASE}/${entry.accountName}/${entry.locationName}/reviews`);
+        url.searchParams.set('pageSize', '50');
+        if (pageToken) url.searchParams.set('pageToken', pageToken);
+        const r = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+        const data = await r.json();
+        if (data.error) throw new Error(`Business Profile API: ${data.error.status || data.error.code} ${data.error.message || ''}`.trim());
+        if (page === 0) {
+          if (typeof data.averageRating === 'number') averageRating = data.averageRating;
+          if (typeof data.totalReviewCount === 'number') totalReviewCount = data.totalReviewCount;
+        }
+        for (const rv of (data.reviews || [])) reviews.push(rv);
+        if (!data.nextPageToken) break;
+        pageToken = data.nextPageToken;
+      }
+
+      const colRef = db.collection(`tenants/${tenantId}/googleReviewsLog`);
+      const normalized = [];
+      let written = 0;
+      for (let i = 0; i < reviews.length; i += 400) {
+        const batch = db.batch();
+        for (const rv of reviews.slice(i, i + 400)) {
+          const reviewId = (rv.reviewId || rv.name?.split('/').pop() || '').replace(/[^A-Za-z0-9_-]/g, '_');
+          if (!reviewId) continue;
+          const doc = {
+            reviewId,
+            authorName:    rv.reviewer?.displayName  || 'Google Reviewer',
+            authorPhoto:   rv.reviewer?.profilePhotoUrl || null,
+            rating:        STAR[rv.starRating] || 0,
+            text:          rv.comment || '',
+            publishTime:   rv.createTime || null,
+            updateTime:    rv.updateTime || null,
+            replyText:     rv.reviewReply?.comment || null,
+            replyTime:     rv.reviewReply?.updateTime || null,
+            locationName:  entry.locationName,
+            appLocationId: entry.appLocationId != null ? entry.appLocationId : null,
+            ingestedAt:    new Date().toISOString(),
+          };
+          batch.set(colRef.doc(reviewId), doc, { merge: true });
+          normalized.push(doc);
+          written++;
+        }
+        await batch.commit();
+      }
+
+      result.written = written;
+      result.total = reviews.length;
+      result.rating = averageRating;
+      result.count = totalReviewCount != null ? totalReviewCount : reviews.length;
+      result.publicReviews = gbpMatch.pickPublicReviews(normalized, 8);
+    } catch (e) {
+      result.error = String(e?.message || e);
+      console.error(`[pullAllReviewsForTenant] tenant=${tenantId} loc=${entry.locationName} failed:`, result.error);
     }
-    await batch.commit();
+    perLocation.push(result);
   }
 
-  await db.doc(`tenants/${tenantId}/data/googleBusinessAuth`).update({
-    lastSyncAt:    new Date().toISOString(),
-    lastSyncCount: written,
-    lastSyncError: null,
+  // Persist per-entry + aggregate sync state. Transaction so a concurrent manual
+  // app-location mapping edit (updateGoogleBusinessLocation) isn't clobbered.
+  const nowIso = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(authRef);
+    if (!snap.exists) return;
+    const cur = snap.data();
+    let locs = Array.isArray(cur.locations) && cur.locations.length ? cur.locations : gbpMatch.synthEntryFromLegacy(cur);
+    const byName = new Map(perLocation.map(r => [r.locationName, r]));
+    locs = locs.map(l => {
+      const r = byName.get(l.locationName);
+      return r ? { ...l, lastSyncAt: nowIso, lastSyncCount: r.written, lastSyncError: r.error } : l;
+    });
+    const primary = locs[0] || null;
+    const patch = {
+      locations:     locs,
+      lastSyncAt:    nowIso,
+      lastSyncCount: perLocation.reduce((s, r) => s + r.written, 0),
+      lastSyncError: perLocation.map(r => r.error).find(Boolean) || null,
+    };
+    if (primary) {
+      patch.refreshTokenEnc = primary.refreshTokenEnc || cur.refreshTokenEnc;
+      patch.accountName     = primary.accountName;
+      patch.locationName    = primary.locationName;
+      patch.locationTitle   = primary.locationTitle;
+    }
+    tx.set(authRef, patch, { merge: true });
   });
 
-  console.log(`[syncGoogleBusinessReviews] tenant=${tenantId} synced ${written} reviews`);
-  return { written, total: reviews.length };
+  await writePublicReviewSummaries(db, tenantId, auth, perLocation).catch(e =>
+    console.error(`[pullAllReviewsForTenant] tenant=${tenantId} public-summary write failed:`, e?.message));
+
+  const written = perLocation.reduce((s, r) => s + r.written, 0);
+  const total = perLocation.reduce((s, r) => s + r.total, 0);
+  console.log(`[syncGoogleBusinessReviews] tenant=${tenantId} synced ${written} reviews across ${perLocation.length} location(s)`);
+  return { written, total, perLocation: perLocation.map(r => ({ locationName: r.locationName, appLocationId: r.appLocationId, written: r.written, total: r.total, error: r.error })) };
 }
 
 exports.syncGoogleBusinessReviews = onCall(
@@ -17460,8 +17623,10 @@ exports.syncGoogleBusinessReviews = onCall(
       throw new HttpsError('invalid-argument', 'Invalid tenantId');
     }
     await requireTenantAdmin(getFirestore(), tenantId, request);
+    const rawLoc = (request.data || {}).locationName;
+    const onlyLocationName = (typeof rawLoc === 'string' && /^[A-Za-z0-9/_-]{1,128}$/.test(rawLoc)) ? rawLoc : undefined;
     try {
-      return await pullAllReviewsForTenant(tenantId);
+      return await pullAllReviewsForTenant(tenantId, { onlyLocationName });
     } catch (e) {
       // Persist the error to the auth doc so the UI can show it without
       // forcing the admin to read logs.
@@ -17486,6 +17651,58 @@ exports.disconnectGoogleBusiness = onCall({ cors: true, timeoutSeconds: 15 }, as
   await getFirestore().doc(`tenants/${tenantId}/data/googleBusinessAuth`).delete();
   console.log(`[disconnectGoogleBusiness] tenant=${tenantId} disconnected`);
   return { ok: true };
+});
+
+// 4b) Per-location management — remap to an app location, toggle active, or
+//     remove a single location. Removing the LAST location deletes the whole
+//     auth doc (== disconnect), clearing the top-level refreshTokenEnc so the
+//     nightly cron drops the tenant. Transactional so a concurrent sync's
+//     locations[] write and this edit can't clobber each other.
+exports.updateGoogleBusinessLocation = onCall({ cors: true, timeoutSeconds: 20 }, async (request) => {
+  const { tenantId: tid, locationName, appLocationId, active, remove } = request.data || {};
+  const tenantId = String(tid || TENANT_ID).slice(0, 64);
+  if (!/^[a-z0-9-]{1,64}$/.test(tenantId)) {
+    throw new HttpsError('invalid-argument', 'Invalid tenantId');
+  }
+  if (typeof locationName !== 'string' || !/^[A-Za-z0-9/_-]{1,128}$/.test(locationName)) {
+    throw new HttpsError('invalid-argument', 'Invalid locationName');
+  }
+  await requireTenantAdmin(getFirestore(), tenantId, request);
+
+  const db = getFirestore();
+  const ref = db.doc(`tenants/${tenantId}/data/googleBusinessAuth`);
+  const out = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('failed-precondition', 'Google Business not connected');
+    const cur = snap.data();
+    let entries = Array.isArray(cur.locations) && cur.locations.length ? cur.locations : gbpMatch.synthEntryFromLegacy(cur);
+    const i = entries.findIndex(e => e.locationName === locationName);
+    if (i < 0) throw new HttpsError('not-found', 'Location not connected');
+
+    if (remove === true) {
+      entries = entries.filter((_, idx) => idx !== i);
+      if (entries.length === 0) { tx.delete(ref); return { ok: true, removed: true, locations: [] }; }
+    } else {
+      const e = { ...entries[i] };
+      if (appLocationId !== undefined) {
+        e.appLocationId = (appLocationId === null || appLocationId === '') ? null : String(appLocationId).slice(0, 64);
+      }
+      if (active !== undefined) e.active = !!active;
+      entries = entries.map((x, idx) => (idx === i ? e : x));
+    }
+
+    const primary = entries[0];
+    tx.set(ref, {
+      locations:       entries,
+      refreshTokenEnc: primary.refreshTokenEnc || cur.refreshTokenEnc,
+      accountName:     primary.accountName,
+      locationName:    primary.locationName,
+      locationTitle:   primary.locationTitle,
+    }, { merge: true });
+    return { ok: true, locations: entries };
+  });
+  console.log(`[updateGoogleBusinessLocation] tenant=${tenantId} loc=${locationName} ${remove ? 'removed' : 'updated'}`);
+  return out;
 });
 
 // 5) Nightly cron — iterates every tenant that has a googleBusinessAuth
