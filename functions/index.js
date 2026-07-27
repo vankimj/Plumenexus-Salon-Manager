@@ -1539,6 +1539,7 @@ async function deliverReceiptEmail(db, tenantId, ref, data) {
         replyTo: (await tenantReplyTo(db, tenantId)) || undefined,
         subject: receiptSubject,
         html,
+        tenantId,
       });
       if (error) throw new Error(error.message || JSON.stringify(error));
       await ref.update({ sent: true, sentAt: new Date().toISOString() });
@@ -3906,6 +3907,7 @@ exports.emailEmployeeInvite = onCall({ cors: true }, async (request) => {
     to:      email,
     subject: `You're invited to ${salonName}'s team on Plume Nexus`,
     html,
+    tenantId,
   });
 
   await db.doc(`tenants/${tenantId}/employees/${employeeId}`).set({
@@ -5600,6 +5602,7 @@ exports.sendReviewRequestEmail = onDocumentCreated(
         replyTo: (await tenantReplyTo(db0, tenantId)) || undefined,
         subject: ratingSubject,
         html,
+        tenantId,
       });
       if (error) throw new Error(error.message || JSON.stringify(error));
       await snap.ref.update({ sent: true, sentAt: new Date().toISOString() });
@@ -5637,6 +5640,7 @@ exports.sendReviewRequestEmail = onDocumentCreated(
       <p style="font-size:11px;color:#bbb;margin:0;">${esc(brand.footerLine)}</p>
     </div>
   </div></body></html>`,
+            tenantId,
           }).catch(e => console.error('[ReviewRequest] Tech notify failed:', e.message));
         }
       }
@@ -5688,6 +5692,7 @@ exports.sendAccessRequestNotification = onDocumentCreated(
         to:      admin.email,
         subject: accessSubject,
         html,
+        tenantId,
       }).catch(e => console.error('[AccessReq] Email to', admin.email, 'failed:', e.message))
     ));
 
@@ -6059,6 +6064,7 @@ exports.sendApptNotification = onDocumentCreated(
         to:      email,
         subject,
         html,
+        tenantId,
       });
 
       if (error) throw new Error(error.message || JSON.stringify(error));
@@ -6251,7 +6257,7 @@ function buildMeetingReminderHtml(meeting, participantName, timeLabel, brand) {
 </html>`;
 }
 
-async function sendMeetingReminderBatch(fromAddr, brand, meeting, participants, timeLabel, ref, flag) {
+async function sendMeetingReminderBatch(fromAddr, brand, meeting, participants, timeLabel, ref, flag, tenantId) {
   const withEmail = (participants || []).filter(p => p.email);
   await Promise.all(withEmail.map(p =>
     sendEmail({
@@ -6259,6 +6265,7 @@ async function sendMeetingReminderBatch(fromAddr, brand, meeting, participants, 
       to:      p.email,
       subject: `Starting in ${timeLabel}: ${meeting.title}`,
       html:    buildMeetingReminderHtml(meeting, p.name, timeLabel, brand),
+      tenantId,
     }).catch(e => console.error('[MeetingReminders] Email to', p.email, 'failed:', e.message))
   ));
   await ref.update({ [`reminders.${flag}`]: true });
@@ -6361,11 +6368,11 @@ exports.sendMeetingReminders = onSchedule(
         const diffMin = (startTimestamp - now) / 60000;
 
         if (diffMin >= 55 && diffMin <= 75 && !reminders.sent60) {
-          await sendMeetingReminderBatch(fromAddr, brand, meeting, participants, '1 hour',     docSnap.ref, 'sent60');
+          await sendMeetingReminderBatch(fromAddr, brand, meeting, participants, '1 hour',     docSnap.ref, 'sent60', tenantId);
           batchesSent++;
         }
         if (diffMin >= 10 && diffMin <= 25 && !reminders.sent15) {
-          await sendMeetingReminderBatch(fromAddr, brand, meeting, participants, '15 minutes', docSnap.ref, 'sent15');
+          await sendMeetingReminderBatch(fromAddr, brand, meeting, participants, '15 minutes', docSnap.ref, 'sent15', tenantId);
           batchesSent++;
         }
       }
@@ -6861,6 +6868,7 @@ exports.sendTechAppointmentReminders = onSchedule(
               to: emp.email.trim(),
               subject,
               html,
+              tenantId,
             });
             if (error) throw new Error(error.message || JSON.stringify(error));
             emailsSent++;
@@ -7213,6 +7221,7 @@ exports.sendBookingConfirmation = onDocumentCreated(
             to:      a.email,
             subject: adminSubject,
             html:    adminHtml,
+            tenantId,
           }).catch(e => console.error('[Booking] Admin email failed:', e.message))
         ));
       }
@@ -7341,6 +7350,7 @@ exports.sendChatNotification = onDocumentCreated(
         to:      a.email,
         subject: msgSubject,
         html,
+        tenantId,
       }).catch(e => console.error('[ChatNotif] Email to', a.email, 'failed:', e.message))
     ));
 
@@ -7399,6 +7409,7 @@ exports.sendReviewReceivedNotification = onDocumentCreated(
         to:      r.email,
         subject: reviewSubject,
         html,
+        tenantId,
       }).catch(e => console.error('[ReviewReceived] Email to', r.email, 'failed:', e.message))
     ));
 
@@ -9107,6 +9118,7 @@ exports.autoBirthdayCampaign = onSchedule(
             replyTo: (await tenantReplyTo(db, tenantId)) || undefined,
             subject: birthdaySubject,
             html,
+            tenantId,
           });
           if (!error) {
             await db.doc(`tenants/${tenantId}/automationSent/${sentDocId}`).set({
@@ -9190,6 +9202,7 @@ exports.autoLapsedCampaign = onSchedule(
             replyTo: (await tenantReplyTo(db, tenantId)) || undefined,
             subject: winbackSubject,
             html,
+            tenantId,
           });
           if (!error) {
             await db.doc(`tenants/${tenantId}/automationSent/${sentDocId}`).set({
@@ -10148,6 +10161,7 @@ exports.createTenantOnboarding = onCall({ cors: true }, async (request) => {
       to:   ownerEmail,
       subject: `Welcome to Plume Nexus — ${salonName} is ready`,
       html: buildWelcomeHtml(salonName, ownerEmail, tenantId, url),
+      tenantId,
     }).catch(e => console.error('[Onboarding] welcome email failed:', e.message));
   }
 
@@ -13136,6 +13150,7 @@ exports.emailMembershipPaymentLink = onCall({ cors: true }, async (request) => {
     replyTo: (await tenantReplyTo(db, tenantId)) || undefined,
     subject: membershipSubject,
     html,
+    tenantId,
   });
 
   await db.doc(`tenants/${tenantId}/memberships/${membershipId}`).set({
@@ -13511,6 +13526,7 @@ exports.sendMeetingInvites = onCall(async (request) => {
     try {
       await sendEmail({
         from:    fromAddr,
+        tenantId,
         to:      email,
         subject: `You're invited: ${meeting.title || 'meeting'} · ${fmtDate(meeting.date)}`,
         html:    meetingInviteHtml({ meeting, token, recipientName: p.name, brand }),
