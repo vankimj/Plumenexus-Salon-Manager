@@ -2718,57 +2718,8 @@ function WebfrontTab({ cfg, setCfg, employees }) {
             Reviews are cached in Firestore and displayed on the public webfront. Refresh periodically to pull the latest from Google.
           </div>
 
-          {/* Google Business Profile OAuth — pulls ALL reviews, not just 5 */}
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px dashed var(--pn-border)' }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--pn-text)', marginBottom: 6 }}>
-              📈 Full review history via Google Business Profile
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--pn-text-muted)', lineHeight: 1.5, marginBottom: 10 }}>
-              The "Refresh from Google" button above uses the public Places API, which caps at <strong>5 reviews</strong>. To pull every review (174+ for Meraki), connect the Business Profile that owns the listing — this lets you OAuth in as the verified salon owner and authorizes us to read the full history. Reviews sync nightly thereafter.
-            </div>
-
-            {!gbpAuth ? (
-              <button onClick={handleConnectGbp} disabled={gbpConnecting}
-                style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: gbpConnecting ? '#aaa' : '#4285f4', color: '#fff', fontSize: 13, fontWeight: 600, cursor: gbpConnecting ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                {gbpConnecting ? 'Opening Google…' : '🔗 Connect Google Business Profile'}
-              </button>
-            ) : (
-              <div style={{ background: 'var(--pn-success-bg)', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 220 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--pn-success)' }}>
-                      ✓ Connected · {gbpAuth.locationTitle || gbpAuth.locationName}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--pn-success)', marginTop: 2 }}>
-                      {gbpAuth.lastSyncAt ? `Last synced ${new Date(gbpAuth.lastSyncAt).toLocaleString()} · ${gbpAuth.lastSyncCount || 0} reviews` : 'Not synced yet — click "Sync now"'}
-                    </div>
-                    {gbpAuth.lastSyncError && (
-                      <div style={{ fontSize: 11, color: '#b91c1c', marginTop: 4 }}>
-                        Last sync error: {gbpAuth.lastSyncError}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                    <button onClick={handleSyncGbp} disabled={gbpSyncing}
-                      style={{ padding: '7px 14px', borderRadius: 8, border: 'none', background: gbpSyncing ? '#aaa' : '#2D7A5F', color: '#fff', fontSize: 12, fontWeight: 600, cursor: gbpSyncing ? 'default' : 'pointer', fontFamily: 'inherit' }}>
-                      {gbpSyncing ? 'Syncing…' : '↻ Sync now'}
-                    </button>
-                    <button onClick={handleDisconnectGbp}
-                      style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--pn-border)', background: 'var(--pn-surface)', color: 'var(--pn-text-muted)', fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      Disconnect
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {gbpMsg && (
-              <div style={{ fontSize: 12, color: gbpMsg.startsWith('✓') ? '#2D7A5F' : '#b91c1c', fontWeight: 500, marginTop: 8 }}>{gbpMsg}</div>
-            )}
-            <div style={{ fontSize: 10, color: 'var(--pn-text-faint)', marginTop: 8, lineHeight: 1.5 }}>
-              Requires GCP setup (see <code style={{ fontFamily: 'ui-monospace, Menlo, monospace', background: 'var(--pn-bg)', padding: '0 4px', borderRadius: 3 }}>docs/GOOGLE_BUSINESS_PROFILE_SETUP.md</code>). Refresh token is encrypted at rest via Cloud KMS.
-            </div>
-          </div>
+          {/* Google Business Profile connect + sync moved to Marketing → Reviews
+              (GoogleBusinessConnect wizard, where the reviews live). */}
         </div>
       </Section>
       </div>

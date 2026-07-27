@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchReviewReceived, fetchReviewRequests } from '../lib/firestore';
 import { ConfigureReviewsLink } from './CompetitorRankingPanel';
+import GoogleBusinessConnect from './GoogleBusinessConnect';
 
 // Reusable Google Reviews dashboard panel.
 // Shows received reviews, requests sent, conversion rate, and a per-tech leaderboard.
@@ -42,6 +43,8 @@ export default function GoogleReviewsPanel() {
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
+
+      <GoogleBusinessConnect />
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <ConfigureReviewsLink />
