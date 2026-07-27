@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { View, Text, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets, SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { auth, callFn } from '../lib/firebase';
 import useMyTenants from '../hooks/useMyTenants';
@@ -19,6 +20,7 @@ const isExpoGo = Constants.appOwnership === 'expo';
 // a revoked selection in the background. Decision table: lib/tenantGate.js.
 export default function TenantGate({ user, children }) {
   const { tenants, loading, error, reload } = useMyTenants();
+  const insets = useSafeAreaInsets();
   // Explicit "Explore the demo salon" from AccessPendingScreen: registers the
   // visitor (joinDemoAsVisitor), scopes queries to 'demo', and bypasses the
   // pending verdict. UI-level override only — the pure gateState table stays
@@ -56,10 +58,11 @@ export default function TenantGate({ user, children }) {
     // "Check again" re-asks getMyTenants — once an admin grants access the
     // real tenant replaces demo automatically.
     if (demoTour || demoOnly) {
+      // Top banner (consumes the status-bar inset), then children with the top
+      // inset zeroed so the nav headers below don't double-pad.
       return (
         <View style={{ flex: 1 }}>
-          <View style={{ flex: 1 }}>{children}</View>
-          <View style={{ backgroundColor: '#2D7A5F', paddingVertical: 8, paddingHorizontal: 14, paddingBottom: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <View style={{ backgroundColor: '#2D7A5F', paddingTop: insets.top, paddingBottom: 8, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
             <Text style={{ color: '#fff', fontSize: 12.5, textAlign: 'center' }}>
               <Text style={{ fontWeight: '700' }}>Demo tour</Text> — read-only sample salon
             </Text>
@@ -67,6 +70,9 @@ export default function TenantGate({ user, children }) {
               <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>I got access — check again</Text>
             </TouchableOpacity>
           </View>
+          <SafeAreaInsetsContext.Provider value={{ ...insets, top: 0 }}>
+            <View style={{ flex: 1 }}>{children}</View>
+          </SafeAreaInsetsContext.Provider>
         </View>
       );
     }
