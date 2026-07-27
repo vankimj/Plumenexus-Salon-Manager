@@ -43,7 +43,15 @@ export function isTerminalAvailable() {
 // The SDK calls this to authenticate with Stripe. Wire into
 // <StripeTerminalProvider tokenProvider={tokenProvider} />.
 export async function tokenProvider() {
-  const r = await createTerminalConnectionToken();
+  let r;
+  try {
+    r = await createTerminalConnectionToken();
+  } catch (e) {
+    // A non-staff / read-only account (e.g. the demo visitor) can't mint a
+    // reader token — expected. Surface a plain, benign error so the SDK just
+    // disables the reader instead of the raw permission-denied FirebaseError.
+    throw new Error('Terminal is not available for this account.');
+  }
   if (!r?.secret) throw new Error('Could not get a Terminal connection token (is Stripe Terminal enabled?)');
   if (_testMode === undefined) _testMode = !!r.testMode;
   return r.secret;

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Image, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { fetchAppointmentsByRange, fetchServices } from '../lib/firestore';
 import useCurrentEmployee from '../hooks/useCurrentEmployee';
+import useTenantAccess from '../hooks/useTenantAccess';
 import EarningsPanel from '../components/EarningsPanel';
 import Icon from '../components/Icon';
 import { useTheme, useThemedStyles } from '../theme/ThemeContext';
@@ -22,14 +23,17 @@ export default function DashboardScreen({ navigation }) {
   const styles = useThemedStyles(makeStyles);
   const { contentMaxWidth } = useResponsive();
   const { employee, techName, loading: empLoading } = useCurrentEmployee();
-  const [appts, setAppts] = useState(null);     // upcoming, active, mine
+  const { isVisitor } = useTenantAccess();
+  const [appts, setAppts] = useState(null);     // upcoming, active (mine, or salon-wide for a visitor)
   const [durByName, setDurByName] = useState({});
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (!techName) { setAppts([]); return; }
     const t = todayISO();
+    // A demo visitor has no employee record (techName null) but should still
+    // see the salon's upcoming appointments, not an empty personal view.
+    if (!techName && !isVisitor) { setAppts([]); return; }
     try {
       const [list, svcs] = await Promise.all([
         fetchAppointmentsByRange(t, addDaysISO(t, 30)).catch(() => []),
@@ -37,12 +41,12 @@ export default function DashboardScreen({ navigation }) {
       ]);
       const dm = {}; (svcs || []).forEach(s => { if (s.name) dm[s.name] = Number(s.duration) || 0; });
       setDurByName(dm);
-      const mine = (list || [])
-        .filter(a => (a.techName || '') === techName && a.date >= t && ACTIVE(a.status))
+      const upcoming = (list || [])
+        .filter(a => a.date >= t && ACTIVE(a.status) && (isVisitor || (a.techName || '') === techName))
         .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.startTime || '').localeCompare(b.startTime || ''));
-      setAppts(mine);
+      setAppts(upcoming);
     } catch { setAppts([]); }
-  }, [techName]);
+  }, [techName, isVisitor]);
   useEffect(() => { load(); }, [load]);
 
   const apptMin = (a) => {
@@ -52,6 +56,56 @@ export default function DashboardScreen({ navigation }) {
   };
 
   if (empLoading || appts === null) return <View style={styles.center}><ActivityIndicator color={theme.blue} /></View>;
+
+  const shownVisitor = showAll ? appts : appts.slice(0, 6);
+
+  // Demo visitor: a welcome + the salon's upcoming appointments, instead of the
+  // staff-personal shift/earnings view (which is empty for a non-staff account).
+  if (isVisitor) {
+    const t = todayISO();
+    const todayCount = appts.filter(a => a.date === t).length;
+    return (
+      <ScrollView style={styles.wrap} contentContainerStyle={[styles.content, contentMaxWidth && { maxWidth: contentMaxWidth, width: '100%', alignSelf: 'center' }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} tintColor={theme.blue} />}>
+        <View style={styles.welcomeCard}>
+          <Text style={styles.welcomeTitle}>Welcome to the demo</Text>
+          <Text style={styles.welcomeBody}>
+            You're exploring a sample salon in read-only mode. Browse the tabs below — Appointments, Clients, and Manage (Reports, Staff, Memberships) — to see how Plume Nexus works.
+          </Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>Today at the salon</Text>
+        <View style={styles.shiftCard}>
+          <Text style={styles.dayOff}>{todayCount > 0 ? `${todayCount} appointment${todayCount === 1 ? '' : 's'} booked today across the team` : 'No appointments booked for today'}</Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>Upcoming appointments</Text>
+        {appts.length === 0 ? (
+          <View style={styles.emptyCard}><Text style={styles.emptyText}>No upcoming appointments.</Text></View>
+        ) : (
+          <>
+            {shownVisitor.map(a => (
+              <View key={a.id} style={styles.apptRow}>
+                <View style={styles.apptWhen}>
+                  <Text style={styles.apptDate}>{fmtApptDate(a.date)}</Text>
+                  <Text style={styles.apptTime}>{fmtTime(a.startTime)}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.apptClient} numberOfLines={1}>{a.clientName || 'Walk-in'}</Text>
+                  <Text style={styles.apptSvc} numberOfLines={1}>{(a.services || []).map(s => s.name).filter(Boolean).join(', ') || '—'}{a.techName ? ` · ${a.techName}` : ''}</Text>
+                </View>
+              </View>
+            ))}
+            {appts.length > 6 && (
+              <TouchableOpacity style={styles.moreBtn} onPress={() => setShowAll(v => !v)}>
+                <Text style={styles.moreText}>{showAll ? 'Show less' : `Show ${appts.length - 6} more`}</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+      </ScrollView>
+    );
+  }
 
   // Today's shift hours from workDays + how much is booked.
   const dow = WEEK_DOW[(new Date().getDay() + 6) % 7];
@@ -151,6 +205,10 @@ const makeStyles = (t) => StyleSheet.create({
   profileLink: { fontSize: 13, color: t.blue, fontWeight: '600', marginTop: 4 },
 
   sectionLabel: { fontSize: 11, color: t.textMuted, textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: '700', marginTop: 20, marginBottom: 8, marginLeft: 4 },
+
+  welcomeCard:  { backgroundColor: t.greenSoft, borderRadius: 14, padding: 18, marginTop: 8 },
+  welcomeTitle: { fontSize: 20, fontWeight: '800', color: t.green, marginBottom: 6 },
+  welcomeBody:  { fontSize: 14, color: t.text, lineHeight: 20 },
 
   shiftCard: { backgroundColor: t.surface, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: t.border },
   shiftRow:  { flexDirection: 'row', justifyContent: 'space-around' },
