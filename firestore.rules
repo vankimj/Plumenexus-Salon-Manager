@@ -209,6 +209,12 @@ service cloud.firestore {
     match /phoneAuthByUid/{uid}       { allow read, write: if false; }
     match /phoneAuthSendQuota/{uid}   { allow read, write: if false; }
     match /serverConfig/{doc}         { allow read, write: if false; }
+    // Phone-first sign-up with verified-email linking (requestEmailOtp /
+    // finalizePhoneEmailAuth): emailAuthOtp holds hashed email codes;
+    // phoneVerifyTicket is the single-use proof-of-phone carried between the
+    // phone-OTP and email-OTP steps. Both are server-only (admin SDK).
+    match /emailAuthOtp/{emailKey}    { allow read, write: if false; }
+    match /phoneVerifyTicket/{id}     { allow read, write: if false; }
 
     // ── Platform-admin audit log ─────────────────────────
     //   Append-only forensic trail of all platform-admin actions.

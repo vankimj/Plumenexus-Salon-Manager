@@ -4,7 +4,7 @@ import { normalizeRole, roleCan, roleExists } from '../lib/rbac';
 import { subscribeCustomRoles } from '../lib/customRoles';
 import { onAuthStateChanged, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithCustomToken, signOut as fbSignOut, sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink } from 'firebase/auth';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
-import { loadAll, saveSlides, saveUsers, saveSettings, submitAccessRequest, fetchAccessRequests, deleteAccessRequest, fetchHandbook, fetchMyHandbookSig, signHandbookDoc, fetchClientByEmail, subscribeToChats, subscribeToRecentNotifications, markNotificationRead, ensureStaffEmailsBackfill, healUsersFullIfMissing, verifyPhoneOtp } from '../lib/firestore';
+import { loadAll, saveSlides, saveUsers, saveSettings, submitAccessRequest, fetchAccessRequests, deleteAccessRequest, fetchHandbook, fetchMyHandbookSig, signHandbookDoc, fetchClientByEmail, subscribeToChats, subscribeToRecentNotifications, markNotificationRead, ensureStaffEmailsBackfill, healUsersFullIfMissing, verifyPhoneOtp, finalizePhoneEmailAuth } from '../lib/firestore';
 import { logActivity, setLoggerUser } from '../lib/logger';
 import { phSVG } from '../utils/helpers';
 import { isFeatureOn } from '../lib/featureFlags';
@@ -707,7 +707,25 @@ export function AppProvider({ children }) {
   // account: one identity regardless of sign-in method.
   const phoneSignIn = useCallback(async (phone, code) => {
     try {
-      const r = await verifyPhoneOtp(phone, code);
+      const r = await verifyPhoneOtp(phone, code, { allowSignup: true });
+      if (r?.ok && r.token) {
+        const cred = await signInWithCustomToken(auth, r.token);
+        return await checkUserAccess(cred.user);
+      }
+      // Number verified but not linked → caller collects + verifies an email,
+      // then calls finalizePhoneEmail with this single-use proof-of-phone ticket.
+      if (r?.ok && r.needsEmail && r.ticket) return { ok: false, needsEmail: true, ticket: r.ticket };
+      return { ok: false, reason: r?.message || 'Sign-in failed.' };
+    } catch (e) {
+      return { ok: false, reason: (e.message || 'Sign-in failed.').replace(/^Firebase: /, '') };
+    }
+  }, []); // eslint-disable-line
+
+  // Step 3 of phone-first sign-up: verified email → link-or-create → sign in.
+  // Routes through checkUserAccess so a new/pending account lands correctly.
+  const finalizePhoneEmail = useCallback(async (ticket, email, code) => {
+    try {
+      const r = await finalizePhoneEmailAuth(ticket, email, code);
       if (!r?.ok || !r.token) return { ok: false, reason: r?.message || 'Sign-in failed.' };
       const cred = await signInWithCustomToken(auth, r.token);
       return await checkUserAccess(cred.user);
@@ -833,7 +851,7 @@ export function AppProvider({ children }) {
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
     addSlide, updateSlide, deleteSlide, setDefault,
     grantAccess, grantPendingAccess, addTechUsersForEmployees, loadPendingRequests, updateSettings,
-    signIn, appleSignIn, phoneSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
+    signIn, appleSignIn, phoneSignIn, finalizePhoneEmail, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
     handbookPending, handbookDoc, signHandbook,
     totalChatUnread,
     recentNotifs, unreadNotifCount, markNotifRead,
@@ -851,7 +869,7 @@ export function AppProvider({ children }) {
     showToast, resetInactivity, resetLogoutTimer, pauseLogoutTimer, resumeLogoutTimer,
     addSlide, updateSlide, deleteSlide, setDefault,
     grantAccess, grantPendingAccess, addTechUsersForEmployees, loadPendingRequests, updateSettings,
-    signIn, appleSignIn, phoneSignIn, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
+    signIn, appleSignIn, phoneSignIn, finalizePhoneEmail, signOut, switchAccount, sendMagicLink, completeMagicLink, magicLinkPending,
     handbookPending, handbookDoc, signHandbook,
     totalChatUnread, recentNotifs, unreadNotifCount, markNotifRead,
     ticket, ticketCount, addApptToTicket, removeApptFromTicket, addProductToTicket, setTicketProductQty, clearTicket,

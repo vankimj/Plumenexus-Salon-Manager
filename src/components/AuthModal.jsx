@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '../context/AppContext';
 
 export default function AuthModal({ onClose, onSuccess }) {
-  const { signIn, appleSignIn, phoneSignIn, sendMagicLink } = useApp();
+  const { signIn, appleSignIn, phoneSignIn, finalizePhoneEmail, sendMagicLink } = useApp();
   const [status,    setStatus]    = useState('');
   const [email,     setEmail]     = useState('');
   const [sending,   setSending]   = useState(false);
@@ -15,6 +15,12 @@ export default function AuthModal({ onClose, onSuccess }) {
   const [otpSent,   setOtpSent]   = useState(false);
   const [otpCode,   setOtpCode]   = useState('');
   const [phoneBusy, setPhoneBusy] = useState(false);
+  // Phone-first sign-up: an unlinked number returns a proof-of-phone ticket; we
+  // then collect + verify an email before linking or creating an account.
+  const [phoneTicket,     setPhoneTicket]     = useState('');
+  const [signupEmail,     setSignupEmail]     = useState('');
+  const [signupEmailSent, setSignupEmailSent] = useState(false);
+  const [signupEmailCode, setSignupEmailCode] = useState('');
 
   async function handleGoogleSignIn() {
     setStatus('');
@@ -50,7 +56,7 @@ export default function AuthModal({ onClose, onSuccess }) {
     setStatus('');
     try {
       const { requestPhoneOtp } = await import('../lib/firestore');
-      await requestPhoneOtp(phone.trim());
+      await requestPhoneOtp(phone.trim(), { allowSignup: true });
       // Always advance — the server answers ok even for unlinked numbers
       // (anti-enumeration). A wrong number surfaces at the verify step.
       setOtpSent(true);
@@ -66,6 +72,35 @@ export default function AuthModal({ onClose, onSuccess }) {
     setPhoneBusy(true);
     setStatus('');
     const result = await phoneSignIn(phone.trim(), otpCode.trim());
+    setPhoneBusy(false);
+    if (result.ok) { onSuccess?.(); onClose(); }
+    // Number verified but not linked → collect + verify an email next.
+    else if (result.needsEmail && result.ticket) { setPhoneTicket(result.ticket); setStatus(''); }
+    else if (result.reason) setStatus(result.reason);
+  }
+
+  async function handleSendSignupEmailOtp() {
+    const em = signupEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setStatus('Enter a valid email address.'); return; }
+    setPhoneBusy(true);
+    setStatus('');
+    try {
+      const { requestEmailOtp } = await import('../lib/firestore');
+      const r = await requestEmailOtp(phoneTicket, em);
+      if (r?.ok) setSignupEmailSent(true);
+      else setStatus('Could not send the code. Try again in a moment.');
+    } catch (e) {
+      setStatus(/expired|start again/i.test(e?.message || '')
+        ? 'Your phone verification expired. Start again.'
+        : (e.message || 'Could not send the code.').replace(/^Firebase: /, ''));
+    } finally { setPhoneBusy(false); }
+  }
+
+  async function handleFinalizeSignupEmail() {
+    if (signupEmailCode.trim().length !== 6) { setStatus('Enter the 6-digit code from the email.'); return; }
+    setPhoneBusy(true);
+    setStatus('');
+    const result = await finalizePhoneEmail(phoneTicket, signupEmail.trim().toLowerCase(), signupEmailCode.trim());
     setPhoneBusy(false);
     if (result.ok) { onSuccess?.(); onClose(); }
     else if (result.reason) setStatus(result.reason);
@@ -114,7 +149,54 @@ export default function AuthModal({ onClose, onSuccess }) {
           </button>
         ) : (
           <div style={{ marginBottom: 16 }}>
-            {!otpSent ? (
+            {phoneTicket ? (
+              <>
+                <p style={{ fontSize: 12, color: 'var(--pn-text-muted)', marginTop: 0, marginBottom: 8, lineHeight: 1.5 }}>
+                  {signupEmailSent
+                    ? `Enter the 6-digit code sent to ${signupEmail.trim().toLowerCase()}.`
+                    : "Add your email to finish setting up your account. If it matches an account you already have, we'll link them."}
+                </p>
+                {!signupEmailSent ? (
+                  <>
+                    <input
+                      type="email"
+                      value={signupEmail}
+                      onChange={e => setSignupEmail(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleSendSignupEmailOtp()}
+                      placeholder="you@example.com"
+                      autoComplete="email"
+                      autoCapitalize="none"
+                      style={{ width: '100%', fontFamily: 'inherit', border: '1px solid var(--pn-border)', borderRadius: 8, padding: '9px 12px', fontSize: 13, outline: 'none', background: 'var(--pn-bg)', color: 'var(--pn-text)', boxSizing: 'border-box', marginBottom: 8 }}
+                    />
+                    <button onClick={handleSendSignupEmailOtp} disabled={phoneBusy}
+                      style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: phoneBusy ? '#d0d0d0' : '#2D7A5F', color: '#fff', fontSize: 14, fontWeight: 600, cursor: phoneBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                      {phoneBusy ? 'Sending…' : 'Email me a code'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={signupEmailCode}
+                      onChange={e => setSignupEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      onKeyDown={e => e.key === 'Enter' && handleFinalizeSignupEmail()}
+                      placeholder="123456"
+                      autoComplete="one-time-code"
+                      style={{ width: '100%', fontFamily: 'inherit', border: '1px solid var(--pn-border)', borderRadius: 8, padding: '9px 12px', fontSize: 16, letterSpacing: 4, textAlign: 'center', outline: 'none', background: 'var(--pn-bg)', color: 'var(--pn-text)', boxSizing: 'border-box', marginBottom: 8 }}
+                    />
+                    <button onClick={handleFinalizeSignupEmail} disabled={phoneBusy}
+                      style={{ width: '100%', padding: '11px', borderRadius: 10, border: 'none', background: phoneBusy ? '#d0d0d0' : '#2D7A5F', color: '#fff', fontSize: 14, fontWeight: 600, cursor: phoneBusy ? 'default' : 'pointer', fontFamily: 'inherit' }}>
+                      {phoneBusy ? 'Verifying…' : 'Verify & continue'}
+                    </button>
+                    <button onClick={() => { setSignupEmailSent(false); setSignupEmailCode(''); setStatus(''); }}
+                      style={{ width: '100%', marginTop: 6, border: 'none', background: 'none', fontSize: 11, color: 'var(--pn-text-faint)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                      Use a different email
+                    </button>
+                  </>
+                )}
+              </>
+            ) : !otpSent ? (
               <>
                 <label style={{ fontSize: 11, color: 'var(--pn-text-muted)', display: 'block', marginBottom: 4 }}>Mobile number</label>
                 <input
