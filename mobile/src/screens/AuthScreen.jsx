@@ -7,7 +7,7 @@ import { GoogleAuthProvider, OAuthProvider, signInWithCredential, signInWithEmai
 import Constants from 'expo-constants';
 import Svg, { Path } from 'react-native-svg';
 import { auth, ALLOWED_EMAILS } from '../lib/firebase';
-import { requestPhoneOtp, verifyPhoneOtp } from '../lib/firestore';
+import { requestPhoneOtp, verifyPhoneOtp, requestEmailOtp, finalizePhoneEmailAuth } from '../lib/firestore';
 import { useThemedStyles } from '../theme/ThemeContext';
 
 // Official Google "G" mark (4-color) for the Sign in with Google button.
@@ -93,6 +93,13 @@ export default function AuthScreen() {
   const [phone,     setPhone]     = useState('');
   const [otpCode,   setOtpCode]   = useState('');
   const [otpSent,   setOtpSent]   = useState(false);
+  // Phone-first sign-up: when the number isn't linked yet, verifyPhoneOtp returns
+  // a proof-of-phone `ticket` and we collect + verify an email before linking or
+  // creating an account (server enforces both channels — see finalizePhoneEmailAuth).
+  const [phoneTicket,    setPhoneTicket]    = useState('');
+  const [signupEmail,    setSignupEmail]    = useState('');
+  const [signupEmailCode,setSignupEmailCode]= useState('');
+  const [signupEmailSent,setSignupEmailSent]= useState(false);
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
@@ -117,7 +124,9 @@ export default function AuthScreen() {
     if (p.replace(/\D/g, '').length < 10) { Alert.alert('Phone sign-in', 'Enter your mobile number.'); return; }
     setLoading(true);
     try {
-      const r = await requestPhoneOtp(p);
+      // allowSignup: a number that isn't linked yet gets a code too, so we can
+      // walk them through verified-email account setup instead of dead-ending.
+      const r = await requestPhoneOtp(p, { allowSignup: true });
       if (r?.ok) { setOtpSent(true); }
       else { Alert.alert('Phone sign-in', "Couldn't send a code. Check the number and try again."); }
     } catch (err) {
@@ -132,12 +141,45 @@ export default function AuthScreen() {
     if (code.length !== 6) { Alert.alert('Phone sign-in', 'Enter the 6-digit code.'); return; }
     setLoading(true);
     try {
-      const r = await verifyPhoneOtp(phone.trim(), code);
+      const r = await verifyPhoneOtp(phone.trim(), code, { allowSignup: true });
       if (r?.ok && r.token) { await signInWithCustomToken(auth, r.token); }
+      // Number verified but not linked yet → collect + verify an email next.
+      else if (r?.ok && r.needsEmail && r.ticket) { setPhoneTicket(r.ticket); }
       else { Alert.alert('Phone sign-in', 'That code didn\'t work. Request a new one.'); }
     } catch (err) {
       // permission-denied carries a helpful message (attempts left / expired).
       Alert.alert('Phone sign-in', err?.message?.replace(/^.*?:\s*/, '') || 'That code didn\'t work.');
+    } finally { setLoading(false); }
+  }
+
+  async function handleSendSignupEmailOtp() {
+    const em = signupEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { Alert.alert('Add your email', 'Enter a valid email address.'); return; }
+    setLoading(true);
+    try {
+      const r = await requestEmailOtp(phoneTicket, em);
+      if (r?.ok) { setSignupEmailSent(true); }
+      else { Alert.alert('Add your email', "Couldn't send a code. Try again in a moment."); }
+    } catch (err) {
+      const msg = /expired|start again/i.test(err?.message || '')
+        ? 'Your phone verification expired. Start again.'
+        : "Couldn't send a code. Try again in a moment.";
+      Alert.alert('Add your email', msg);
+    } finally { setLoading(false); }
+  }
+
+  async function handleFinalizeSignupEmail() {
+    const em = signupEmail.trim().toLowerCase();
+    const code = signupEmailCode.replace(/\D/g, '');
+    if (code.length !== 6) { Alert.alert('Verify email', 'Enter the 6-digit code.'); return; }
+    setLoading(true);
+    try {
+      const r = await finalizePhoneEmailAuth(phoneTicket, em, code);
+      if (r?.ok && r.token) { await signInWithCustomToken(auth, r.token); }
+      else { Alert.alert('Verify email', 'That code didn\'t work. Request a new one.'); }
+    } catch (err) {
+      // permission-denied → attempts left / expired; staff-email guard message; else generic.
+      Alert.alert('Verify email', err?.message?.replace(/^.*?:\s*/, '') || 'That code didn\'t work.');
     } finally { setLoading(false); }
   }
 
@@ -295,7 +337,57 @@ export default function AuthScreen() {
           </TouchableOpacity>
         ) : (
           <View style={styles.emailForm}>
-            {!otpSent ? (
+            {phoneTicket ? (
+              // Number verified, not linked yet → collect + verify an email.
+              <>
+                <Text style={styles.helpText}>
+                  {signupEmailSent
+                    ? `Enter the 6-digit code we emailed to ${signupEmail.trim().toLowerCase()}.`
+                    : "Add your email to finish setting up your account. If it matches an account you already have, we'll link them."}
+                </Text>
+                {!signupEmailSent ? (
+                  <>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Email"
+                      placeholderTextColor={styles._muted.color}
+                      value={signupEmail}
+                      onChangeText={setSignupEmail}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="email-address"
+                      textContentType="emailAddress"
+                      autoComplete="email"
+                      onSubmitEditing={handleSendSignupEmailOtp}
+                    />
+                    <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleSendSignupEmailOtp} disabled={loading} activeOpacity={0.85}>
+                      {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Send code</Text>}
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="6-digit code"
+                      placeholderTextColor={styles._muted.color}
+                      value={signupEmailCode}
+                      onChangeText={setSignupEmailCode}
+                      keyboardType="number-pad"
+                      textContentType="oneTimeCode"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      onSubmitEditing={handleFinalizeSignupEmail}
+                    />
+                    <TouchableOpacity style={[styles.emailBtn, loading && { opacity: 0.6 }]} onPress={handleFinalizeSignupEmail} disabled={loading} activeOpacity={0.85}>
+                      {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.emailBtnText}>Verify & continue</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ paddingVertical: 10, alignItems: 'center' }} onPress={() => { setSignupEmailSent(false); setSignupEmailCode(''); }} disabled={loading}>
+                      <Text style={styles._muted}>Use a different email</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </>
+            ) : !otpSent ? (
               <>
                 <TextInput
                   style={styles.input}
@@ -383,6 +475,7 @@ const makeStyles = (t) => StyleSheet.create({
   // Placeholder color needs a resolved value, not a style — stashed here so
   // the component can read it via styles._muted.color.
   _muted:    { color: t.placeholder },
+  helpText:  { color: t.textMuted, fontSize: 13, lineHeight: 18, marginBottom: 2 },
   devBtn:    { width: '100%', paddingVertical: 12, alignItems: 'center', marginTop: 14, borderRadius: 12, borderWidth: 1, borderColor: t.border, borderStyle: 'dashed' },
   devBtnText:{ color: t.textMuted, fontSize: 12, fontWeight: '500', letterSpacing: 0.4 },
 });

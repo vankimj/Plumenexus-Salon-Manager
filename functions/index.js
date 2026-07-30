@@ -17,6 +17,7 @@ const { roleCan, normalizeRole, resolveRoleCaps, sanitizeCaps, roleExists, CAPS,
 const { resolveInternalRouting, isCustomerNotifEnabled } = require('./lib/notificationRouting');
 const { selectRebookCandidates, futureClientIdSet, rebookTargetDates } = require('./lib/rebookNudge');
 const phoneAuth = require('./lib/phoneAuth');
+const emailAuth = require('./lib/emailAuth');
 const { parseStaffResponse } = require('./lib/staffImport');
 const gbpMatch = require('./gbpMatch');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
@@ -4786,9 +4787,37 @@ exports.requestPhoneOtp = onCall({ cors: true }, async (request) => {
   // Every branch returns {ok:true} with no awaited SMS, so linked and unlinked
   // numbers are indistinguishable by response shape OR timing (no enumeration).
   if (!request.auth) {
+    // For new-flow (allowSignup) callers, check App Check BEFORE the linked/
+    // unlinked split so it fires uniformly on both — otherwise, once enforcement
+    // (#520) is flipped on, a token-less request would 403 on unlinked numbers
+    // but pass on linked ones, leaking linked-status. Monitor mode today: no
+    // throw, just logs; the shipped binary (no allowSignup) is untouched.
+    if (request.data?.allowSignup) requireAppCheck(request, 'requestPhoneOtp:signup');
     const idx = await db.doc(`phoneAuthIndex/${key}`).get();
-    if (!idx.exists) return { ok: true };
-    await _issueAndSendOtp(db, otpRef, phone, now, 'signin', pepper, false); // throttle handled inside, silently
+    if (idx.exists) {
+      await _issueAndSendOtp(db, otpRef, phone, now, 'signin', pepper, false); // throttle handled inside, silently
+      return { ok: true };
+    }
+    // Unlinked number. Old clients (no `allowSignup`) get the historical silent
+    // no-op — preserving the enumeration defense AND the exact shipped-binary
+    // contract. New clients opting into phone-first sign-up DO get a code sent
+    // (an unlinked number gets a code either way with the flag, so linked-status
+    // still isn't revealed). Verified email is required later before any linking.
+    if (request.data?.allowSignup) {
+      // Unauthenticated SMS to an attacker-chosen number → bound it HARD to
+      // prevent SMS-pumping / toll fraud (per-destination cap alone is defeated
+      // by rotating numbers). Durable per-IP daily cap + global daily budget.
+      // Over-cap → silently skip the send (uniform {ok:true}, no oracle) so a
+      // legit user just retries later.
+      const ip = ipKeyPart(request.rawRequest?.ip);
+      const day = new Date(now).toISOString().slice(0, 10);
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const [ipOk, globalOk] = await Promise.all([
+        fsRateAllow(db, TENANT_ID, `signupSmsIp_${day}_${ip}`, 5, DAY_MS),
+        fsRateAllow(db, TENANT_ID, `signupSmsGlobal_${day}`, 500, DAY_MS),
+      ]);
+      if (ipOk && globalOk) await _issueAndSendOtp(db, otpRef, phone, now, 'signup', pepper, false);
+    }
     return { ok: true };
   }
 
@@ -4882,7 +4911,18 @@ exports.verifyPhoneOtp = onCall({ cors: true }, async (request) => {
   // SIGN IN: resolve the linked account and mint a custom token for THAT uid, so
   // the session carries their email → existing staffEmails authorization applies.
   const idx = (await db.doc(`phoneAuthIndex/${key}`).get()).data();
-  if (!idx?.uid) throw new HttpsError('not-found', 'This number isn\'t set up for sign-in. Sign in another way and add it in your profile.');
+  if (!idx?.uid) {
+    // Unlinked number. Old clients: unchanged not-found. New clients opting into
+    // phone-first sign-up: the SMS code above already proved control of the
+    // number, so mint a single-use, short-lived proof-of-phone ticket. The
+    // client then attaches an email and proves it (requestEmailOtp →
+    // finalizePhoneEmailAuth) before we link or create anything.
+    if (request.data?.allowSignup) {
+      const ticket = await _mintPhoneVerifyTicket(db, phone, key, now);
+      return { ok: true, needsEmail: true, ticket };
+    }
+    throw new HttpsError('not-found', 'This number isn\'t set up for sign-in. Sign in another way and add it in your profile.');
+  }
   let user;
   try { user = await getAuth().getUser(idx.uid); }
   catch { throw new HttpsError('not-found', 'That account no longer exists.'); }
@@ -4911,6 +4951,248 @@ exports.getPhoneSigninStatus = onCall({ cors: true }, async (request) => {
   const byUid = (await getFirestore().doc(`phoneAuthByUid/${request.auth.uid}`).get()).data();
   if (!byUid?.phoneE164) return { ok: true, linked: false };
   return { ok: true, linked: true, last4: String(byUid.phoneE164).slice(-4) };
+});
+
+// ── Phone-first sign-up with VERIFIED-email account linking ──────────────────
+// Flow (see [[project_identity_unification]]): a phone OTP proves the number →
+// verifyPhoneOtp(allowSignup) mints a phoneVerifyTicket → requestEmailOtp emails
+// a code (proving the mailbox) → finalizePhoneEmailAuth links the phone to the
+// existing account with that email, or creates a fresh one. The invariant that
+// makes this safe: we LINK only when BOTH channels are proven in the same
+// session, so holding just the phone can never claim someone else's email
+// account. All the OTP hardening (transactional lockout, pepper-hash, TTL,
+// constant-time compare, send-throttle) is the shared phoneAuth/emailAuth logic.
+//
+// Server-only collections (locked read/write:false in firestore.rules):
+// emailAuthOtp (hashed email codes), phoneVerifyTicket (proof-of-phone),
+// serverConfig/emailOtp (email pepper).
+
+const PLATFORM_EMAIL_FROM = 'Plume Nexus <noreply@send.plumenexus.com>';
+const PHONE_VERIFY_TICKET_TTL_MS = 10 * 60 * 1000; // proof-of-phone valid 10 min
+
+async function _emailOtpPepper(db) {
+  const ref = db.doc('serverConfig/emailOtp');
+  const snap = await ref.get();
+  if (snap.exists && snap.data()?.pepper) return snap.data().pepper;
+  const pepper = crypto.randomBytes(32).toString('hex');
+  try { await ref.create({ pepper, createdAt: new Date().toISOString() }); return pepper; }
+  catch { return (await ref.get()).data()?.pepper; }
+}
+
+// Unguessable, single-use, short-lived server token proving this session verified
+// control of `phoneE164`. Stored server-only; never a client-forgeable claim.
+async function _mintPhoneVerifyTicket(db, phoneE164, phoneKey, now) {
+  const id = crypto.randomBytes(32).toString('base64url');
+  await db.doc(`phoneVerifyTicket/${id}`).set({
+    phoneKey, phoneE164,
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + PHONE_VERIFY_TICKET_TTL_MS).toISOString(),
+  });
+  return id;
+}
+
+// Atomic validate + bind-the-recipient for requestEmailOtp. The ticket is NOT
+// consumed here (finalize does that), but each DISTINCT recipient address is
+// recorded and capped, so one phone verification can't spray codes at many
+// third-party addresses (email-bombing / SES-rep abuse). A few distinct keys are
+// allowed for typo correction; same-address resends are additionally throttled
+// by the per-email canSendOtp gate. Returns { ok } / { ok:false, capped? }.
+const MAX_EMAIL_RECIPIENTS_PER_TICKET = 3;
+async function _reserveTicketEmailSend(db, ticketId, emailKey, now) {
+  const ref = db.doc(`phoneVerifyTicket/${String(ticketId || '').slice(0, 128)}`);
+  return db.runTransaction(async (tx) => {
+    const t = (await tx.get(ref)).data() || null;
+    if (!t || t.consumedAt) return { ok: false };
+    if (!t.expiresAt || now >= new Date(t.expiresAt).getTime()) return { ok: false };
+    const keys = Array.isArray(t.emailKeys) ? t.emailKeys : [];
+    if (!keys.includes(emailKey)) {
+      if (keys.length >= MAX_EMAIL_RECIPIENTS_PER_TICKET) return { ok: false, capped: true };
+      tx.set(ref, { emailKeys: [...keys, emailKey] }, { merge: true });
+    }
+    return { ok: true };
+  });
+}
+
+// Atomic validate-and-consume (single-use) at the finalize step.
+async function _consumePhoneVerifyTicket(db, ticketId, now) {
+  const ref = db.doc(`phoneVerifyTicket/${String(ticketId || '').slice(0, 128)}`);
+  return db.runTransaction(async (tx) => {
+    const t = (await tx.get(ref)).data() || null;
+    if (!t || t.consumedAt) return { ok: false };
+    if (!t.expiresAt || now >= new Date(t.expiresAt).getTime()) return { ok: false };
+    tx.set(ref, { consumedAt: new Date(now).toISOString() }, { merge: true });
+    return { ok: true, phoneE164: t.phoneE164, phoneKey: t.phoneKey };
+  });
+}
+
+// Bind phone↔uid (one phone per account). Refuses to steal a number already
+// linked to a DIFFERENT account (race hardening — mirrors verifyPhoneOtp's link).
+async function _bindPhoneToUid(db, phoneKey, phoneE164, uid, email, now) {
+  const idxRef = db.doc(`phoneAuthIndex/${phoneKey}`);
+  const existing = (await idxRef.get()).data();
+  if (existing?.uid && existing.uid !== uid) {
+    throw new HttpsError('already-exists', 'That number is already linked to another account.');
+  }
+  const byUid = (await db.doc(`phoneAuthByUid/${uid}`).get()).data();
+  if (byUid?.phoneKey && byUid.phoneKey !== phoneKey) {
+    await db.doc(`phoneAuthIndex/${byUid.phoneKey}`).delete().catch(() => {});
+  }
+  const at = new Date(now).toISOString();
+  await Promise.all([
+    idxRef.set({ uid, email, linkedAt: at }, { merge: true }),
+    db.doc(`phoneAuthByUid/${uid}`).set({ phoneKey, phoneE164, linkedAt: at }, { merge: true }),
+  ]);
+}
+
+// Is this email staff/admin in ANY tenant? Derived from real membership docs
+// (tenants/{t}/data/users staffEmails/adminEmails), never from a client-supplied
+// tenantId. Emails are trim+lowercased on both sides. Fail-CLOSED: if the scan
+// errors we treat the email as privileged (refuse the self-serve link) rather
+// than risk attaching a phone login to a staff account.
+async function _emailIsPrivilegedAnywhere(db, email) {
+  const norm = String(email || '').trim().toLowerCase();
+  if (!norm) return false;
+  let refs;
+  try { refs = await db.collection('tenants').listDocuments(); }
+  catch (e) { console.warn('[finalizePhoneEmailAuth] tenant scan failed, failing closed:', e?.message); return true; }
+  try {
+    for (const t of refs.slice(0, 500)) {
+      const u = (await t.collection('data').doc('users').get()).data();
+      if (!u) continue;
+      const set = [...(u.staffEmails || []), ...(u.adminEmails || [])].map(e => String(e).trim().toLowerCase());
+      if (set.includes(norm)) return true;
+    }
+  } catch (e) { console.warn('[finalizePhoneEmailAuth] tenant scan read failed, failing closed:', e?.message); return true; }
+  return false;
+}
+
+// Step 2 — email a 6-digit code to the address the phone-verified user typed.
+// Gated on a valid phoneVerifyTicket so codes can't be sprayed at arbitrary
+// addresses. Sent with NO tenantId → it's a platform login code, never
+// sandbox-suppressed. Uniform {ok:true} regardless of whether the email matches
+// an existing account or the per-email cap was hit → no enumeration, no timing
+// oracle (send is fire-and-forget).
+exports.requestEmailOtp = onCall({ cors: true }, async (request) => {
+  const email = emailAuth.normalizeEmail(String(request.data?.email || ''));
+  if (!emailAuth.isValidEmail(email)) throw new HttpsError('invalid-argument', 'Enter a valid email address.');
+  const db = getFirestore();
+  const now = Date.now();
+
+  const emailKey = emailAuth.emailDocKey(email);
+  const gate = await _reserveTicketEmailSend(db, request.data?.ticket, emailKey, now);
+  if (!gate.ok) {
+    throw new HttpsError('failed-precondition',
+      gate.capped ? 'Too many codes requested. Please start again.' : 'Your phone verification expired. Please start again.');
+  }
+
+  const pepper = await _emailOtpPepper(db);
+  const otpRef = db.doc(`emailAuthOtp/${emailKey}`);
+  const reserve = await db.runTransaction(async (tx) => {
+    const cur = (await tx.get(otpRef)).data() || null;
+    if (!phoneAuth.canSendOtp(cur, now).allowed) return { sent: false };
+    const code = phoneAuth.generateOtpCode();
+    tx.set(otpRef, {
+      codeHash:   phoneAuth.hashOtp(code, email, pepper),
+      expiresAt:  new Date(now + phoneAuth.OTP_TTL_MS).toISOString(),
+      attempts:   0,
+      consumedAt: FieldValue.delete(),
+      purpose:    'email-verify',
+      ...phoneAuth.nextSendAccounting(cur, now),
+      updatedAt:  new Date(now).toISOString(),
+    }, { merge: true });
+    return { sent: true, code };
+  });
+
+  if (reserve.sent) {
+    sendEmail({
+      from: PLATFORM_EMAIL_FROM,
+      to: email,
+      subject: `${reserve.code} is your Plume Nexus verification code`,
+      html: `<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;color:#0f1923">
+        <p>Your Plume Nexus verification code is:</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:8px 0">${reserve.code}</p>
+        <p style="color:#556">It expires in 10 minutes. If you didn't request this, you can ignore this email.</p></div>`,
+      tags: [{ name: 'kind', value: 'auth-otp' }],
+    }).catch(e => console.error('[requestEmailOtp] send failed:', e?.message));
+  }
+  return { ok: true };
+});
+
+// Step 3 — both channels proven → link or create. Consumes the phone ticket
+// (single-use) and the email OTP (atomic check-and-consume, real 5-try lockout),
+// then: matches an existing account by email → LINK phone to it; no match →
+// CREATE a new user (email marked verified, since we just proved it). Staff/admin
+// emails are refused here by design — high-value accounts link phones only from
+// an authenticated Profile session.
+exports.finalizePhoneEmailAuth = onCall({ cors: true }, async (request) => {
+  const email    = emailAuth.normalizeEmail(String(request.data?.email || ''));
+  const code     = String(request.data?.emailCode || '').replace(/\D/g, '');
+  if (!emailAuth.isValidEmail(email)) throw new HttpsError('invalid-argument', 'Enter a valid email address.');
+  if (code.length !== phoneAuth.OTP_CODE_LEN) throw new HttpsError('invalid-argument', 'Enter the 6-digit code.');
+  const db = getFirestore();
+  const now = Date.now();
+
+  // 1) Consume the proof-of-phone ticket (single-use).
+  const ticket = await _consumePhoneVerifyTicket(db, request.data?.ticket, now);
+  if (!ticket.ok) throw new HttpsError('failed-precondition', 'Your phone verification expired. Please start again.');
+  const { phoneE164: phone, phoneKey } = ticket;
+
+  // 2) Verify the email OTP — atomic check-and-consume so the lockout is real.
+  const pepper = await _emailOtpPepper(db);
+  const otpRef = db.doc(`emailAuthOtp/${emailAuth.emailDocKey(email)}`);
+  const res = await db.runTransaction(async (tx) => {
+    const rec = (await tx.get(otpRef)).data() || null;
+    const r = phoneAuth.evaluateOtp(rec, code, email, pepper, now);
+    if (!r.ok) {
+      if (r.reason === 'bad_code') tx.set(otpRef, { attempts: (Number(rec?.attempts) || 0) + 1 }, { merge: true });
+      return r;
+    }
+    tx.set(otpRef, { consumedAt: new Date(now).toISOString() }, { merge: true });
+    return r;
+  });
+  if (!res.ok) {
+    if (res.reason === 'bad_code') {
+      throw new HttpsError('permission-denied',
+        res.attemptsLeft > 0 ? `Incorrect code. ${res.attemptsLeft} attempt${res.attemptsLeft === 1 ? '' : 's'} left.` : 'Too many incorrect attempts. Request a new code.',
+        { attemptsLeft: res.attemptsLeft });
+    }
+    throw new HttpsError('permission-denied',
+      res.reason === 'expired' ? 'That code expired. Request a new one.' : 'That code is no longer valid. Request a new one.');
+  }
+
+  // BOTH phone and email now proven for this session.
+  let existing = null;
+  try { existing = await getAuth().getUserByEmail(email); } catch { existing = null; }
+
+  if (existing) {
+    if (existing.disabled) throw new HttpsError('permission-denied', 'That account is disabled.');
+    // Guard: keep the self-serve phone attach OFF high-value accounts. They own
+    // the mailbox (verified), but staff/admin link phones from an authenticated
+    // Profile session only. Privilege is derived from REAL memberships across
+    // every tenant server-side — never from a client-supplied tenantId (which
+    // an attacker could set to a tenant where the email isn't staff).
+    if (await _emailIsPrivilegedAnywhere(db, email)) {
+      throw new HttpsError('permission-denied',
+        'This email belongs to a staff account. Sign in with it, then add your phone under Profile → Sign-in methods.');
+    }
+    await _bindPhoneToUid(db, phoneKey, phone, existing.uid, email, now);
+    const token = await getAuth().createCustomToken(existing.uid);
+    return { ok: true, token, linked: true };
+  }
+
+  // No existing account → create one. Email is marked verified (just proven).
+  let uid;
+  try {
+    uid = (await getAuth().createUser({ email, emailVerified: true })).uid;
+  } catch (e) {
+    // Lost a race to another create with the same email → fall back to linking.
+    if (e?.code === 'auth/email-already-exists') {
+      uid = (await getAuth().getUserByEmail(email)).uid;
+    } else { throw e; }
+  }
+  await _bindPhoneToUid(db, phoneKey, phone, uid, email, now);
+  const token = await getAuth().createCustomToken(uid);
+  return { ok: true, token, created: true };
 });
 
 // RBAC #8 — the server-funnel for kiosk sales. A dedicated kiosk identity has NO

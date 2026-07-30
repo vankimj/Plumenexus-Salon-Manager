@@ -3490,12 +3490,12 @@ export async function removeWaitlistEntry(id) {
 // Same deployed callables the mobile app uses (PR #519). verifyPhoneOtp mints a
 // custom token for the EXISTING account uid linked to the phone (via
 // phoneAuthIndex) — one unified account regardless of sign-in method.
-export async function requestPhoneOtp(phone) {
-  const res = await callFn('requestPhoneOtp')({ phone });
+export async function requestPhoneOtp(phone, { allowSignup = false } = {}) {
+  const res = await callFn('requestPhoneOtp')({ phone, allowSignup });
   return res?.data || { ok: false };
 }
-export async function verifyPhoneOtp(phone, code) {
-  const res = await callFn('verifyPhoneOtp')({ phone, code });
+export async function verifyPhoneOtp(phone, code, { allowSignup = false } = {}) {
+  const res = await callFn('verifyPhoneOtp')({ phone, code, allowSignup });
   return res?.data || { ok: false };
 }
 export async function unlinkPhoneSignin() {
@@ -3505,6 +3505,19 @@ export async function unlinkPhoneSignin() {
 export async function getPhoneSigninStatus() {
   const res = await callFn('getPhoneSigninStatus')({});
   return res?.data || { ok: false, linked: false };
+}
+// Phone-first sign-up with verified-email linking. After verifyPhoneOtp returns
+// { needsEmail:true, ticket }, requestEmailOtp emails a code; finalizePhoneEmailAuth
+// verifies it and returns a custom token (linking to the existing account with
+// that email, or creating one). The staff/admin auto-link guard is derived
+// server-side from real memberships — no tenantId is trusted from the client.
+export async function requestEmailOtp(ticket, email) {
+  const res = await callFn('requestEmailOtp')({ ticket, email });
+  return res?.data || { ok: false };
+}
+export async function finalizePhoneEmailAuth(ticket, email, emailCode) {
+  const res = await callFn('finalizePhoneEmailAuth')({ ticket, email, emailCode });
+  return res?.data || { ok: false };
 }
 
 // ── Demo-visitor tour ─────────────────────────────────────

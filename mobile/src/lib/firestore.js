@@ -762,12 +762,12 @@ export async function fetchGiftCardsByContact(qRaw) {
 // Staff phone sign-in (SMS OTP → custom token). requestPhoneOtp is callable
 // unauthenticated (sign-in) or authenticated (link). verifyPhoneOtp returns a
 // custom token when signing in, or { linked:true } when linking.
-export async function requestPhoneOtp(phone) {
-  const res = await callFn('requestPhoneOtp')({ phone });
+export async function requestPhoneOtp(phone, { allowSignup = false } = {}) {
+  const res = await callFn('requestPhoneOtp')({ phone, allowSignup });
   return res?.data || { ok: false };
 }
-export async function verifyPhoneOtp(phone, code) {
-  const res = await callFn('verifyPhoneOtp')({ phone, code });
+export async function verifyPhoneOtp(phone, code, { allowSignup = false } = {}) {
+  const res = await callFn('verifyPhoneOtp')({ phone, code, allowSignup });
   return res?.data || { ok: false };
 }
 export async function unlinkPhoneSignin() {
@@ -777,6 +777,18 @@ export async function unlinkPhoneSignin() {
 export async function getPhoneSigninStatus() {
   const res = await callFn('getPhoneSigninStatus')({});
   return res?.data || { ok: false, linked: false };
+}
+// Phone-first sign-up with verified-email linking. After verifyPhoneOtp returns
+// { needsEmail:true, ticket }, requestEmailOtp emails a code; finalizePhoneEmailAuth
+// verifies it and returns a custom token (linking to the existing account with
+// that email, or creating a new one).
+export async function requestEmailOtp(ticket, email) {
+  const res = await callFn('requestEmailOtp')({ ticket, email });
+  return res?.data || { ok: false };
+}
+export async function finalizePhoneEmailAuth(ticket, email, emailCode) {
+  const res = await callFn('finalizePhoneEmailAuth')({ ticket, email, emailCode });
+  return res?.data || { ok: false };
 }
 
 // Stripe Terminal (Slice 2) — backend callables. The reader/Tap-to-Pay flow
