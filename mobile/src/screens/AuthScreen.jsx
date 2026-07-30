@@ -22,6 +22,25 @@ function GoogleG({ size = 18 }) {
   );
 }
 
+// Simple stroke glyphs so the email/phone buttons carry an icon like the
+// Google/Apple buttons above them. Color is passed in so it tracks the theme.
+function MailIcon({ size = 18, color = '#3c4043' }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M3.5 6.5A1.5 1.5 0 0 1 5 5h14a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5v-11Z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+      <Path d="m4.5 7 7.5 5.5L19.5 7" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function PhoneIcon({ size = 18, color = '#3c4043' }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M6.8 3.5h2.7l1.4 4-1.9 1.3a11.5 11.5 0 0 0 5.2 5.2l1.3-1.9 4 1.4v2.7a1.8 1.8 0 0 1-2 1.8A15.5 15.5 0 0 1 5 5.5a1.8 1.8 0 0 1 1.8-2Z" stroke={color} strokeWidth={1.8} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 // Apple requires a one-time nonce: send SHA256(rawNonce) to Apple, pass rawNonce
 // to Firebase so it can verify the returned id_token wasn't replayed.
 function randomNonce(len = 32) {
@@ -216,8 +235,14 @@ export default function AuthScreen() {
             (no Google or Apple account required). Also the typed-credential
             path App Review uses with the demo account. */}
         {!showEmail ? (
-          <TouchableOpacity style={styles.emailLink} onPress={() => setShowEmail(true)} disabled={loading}>
-            <Text style={styles.emailLinkText}>Sign in with email</Text>
+          <TouchableOpacity
+            style={[styles.secondaryBtn, loading && { opacity: 0.6 }]}
+            onPress={() => setShowEmail(true)}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            <MailIcon size={18} color={styles.secondaryBtnText.color} />
+            <Text style={styles.secondaryBtnText}>Sign in with email</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.emailForm}>
@@ -259,8 +284,14 @@ export default function AuthScreen() {
 
         {/* Phone sign-in — staff who linked their number in Profile. */}
         {!showPhone ? (
-          <TouchableOpacity style={styles.emailLink} onPress={() => setShowPhone(true)} disabled={loading}>
-            <Text style={styles.emailLinkText}>Sign in with phone</Text>
+          <TouchableOpacity
+            style={[styles.secondaryBtn, loading && { opacity: 0.6 }]}
+            onPress={() => setShowPhone(true)}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            <PhoneIcon size={18} color={styles.secondaryBtnText.color} />
+            <Text style={styles.secondaryBtnText}>Sign in with phone</Text>
           </TouchableOpacity>
         ) : (
           <View style={styles.emailForm}>
@@ -343,8 +374,8 @@ const makeStyles = (t) => StyleSheet.create({
   googleBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dadce0', borderRadius: 12, paddingVertical: 13 },
   googleBtnText: { color: '#3c4043', fontSize: 15, fontWeight: '600' },
   appleBtn:  { width: '100%', height: 48, marginTop: 12 },
-  emailLink: { paddingVertical: 14, alignItems: 'center' },
-  emailLinkText: { color: t.textMuted, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+  secondaryBtn: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: 12, paddingVertical: 13, marginTop: 12 },
+  secondaryBtnText: { color: t.text, fontSize: 15, fontWeight: '600' },
   emailForm: { width: '100%', marginTop: 14, gap: 10 },
   input:     { width: '100%', borderWidth: 1, borderColor: t.border, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, fontSize: 15, color: t.text, backgroundColor: t.surface },
   emailBtn:  { width: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: t.teal, borderRadius: 12, paddingVertical: 13 },
