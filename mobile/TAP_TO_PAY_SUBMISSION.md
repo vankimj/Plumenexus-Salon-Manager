@@ -15,13 +15,14 @@ Key facts to reuse in every form:
 
 ## Step 1 — Request the DEVELOPMENT entitlement (Account Holder, ~1–2 business days)
 
-1. Sign in as the **Account Holder** at [Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list).
-2. Click the **Plume Nexus Salons** identifier (`com.plumenexus.salon`).
-3. Open the **Capability Requests** tab.
-4. Find **Tap to Pay on iPhone** → click **Request**.
-5. Fill the form (answers below), confirm your app meets the criteria, submit.
+**Tap to Pay is NOT requested via a portal capability tab** (it won't appear under Capabilities OR Capability Requests). Apple routes it through a dedicated **contact-request form**; the capability only shows up under the App ID's **"Additional Capabilities"** tab AFTER Apple grants it.
 
-Reference: [Apple — Capability Requests](https://developer.apple.com/help/account/capabilities/capability-requests/) · [Setting up the entitlement](https://developer.apple.com/documentation/ProximityReader/setting-up-the-entitlement-for-tap-to-pay-on-iPhone)
+1. Sign in as the **Account Holder** (organization account required).
+2. Open the request form: **https://developer.apple.com/contact/request/tap-to-pay-on-iphone/**
+3. Fill it (answers below), confirm your app meets the criteria, submit.
+4. Apple reviews against fixed criteria → adds it as a managed capability (~1–2 business days for development). You'll get a **confirmation email** — save it; the distribution request (Step 4) is a reply to it.
+
+Reference: [Apple — Setting up the entitlement](https://developer.apple.com/documentation/ProximityReader/setting-up-the-entitlement-for-tap-to-pay-on-iPhone) (the doc's "request form" link is the URL above). Platforms must also accept Stripe's [Apple Acceptance Platform Terms](https://stripe.com/legal/apple-acceptance-platform).
 
 **Form answers (copy/paste):**
 - **What does your app do / use case:** "Plume Nexus Salon Manager is a point-of-sale and business-management app for salons. Staff check clients out at the front desk and in the chair. Tap to Pay on iPhone lets them accept in-person contactless card and Apple Pay payments on the iPhone with no extra hardware."
