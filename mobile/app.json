@@ -22,6 +22,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.plumenexus.salon",
       "usesAppleSignIn": true,
+      "entitlements": {
+        "com.apple.developer.proximity-reader.payment.acceptance": true
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Plume Nexus uses the camera to take profile photos for staff and photos for your salon's tip-screen display.",
