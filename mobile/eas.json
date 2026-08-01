@@ -34,6 +34,11 @@
         "ascApiKeyPath": "/Users/jonathanvankim/.config/plumenexus/AuthKey_YN5UHUC8BW.p8",
         "ascApiKeyId": "YN5UHUC8BW",
         "ascApiKeyIssuerId": "f9d5e228-891d-49bc-b05c-b9065d712f3c"
+      },
+      "android": {
+        "serviceAccountKeyPath": "/Users/jonathanvankim/.config/plumenexus/play-service-account.json",
+        "track": "internal",
+        "releaseStatus": "draft"
       }
     }
   }
