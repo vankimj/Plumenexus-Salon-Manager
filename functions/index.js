@@ -20,6 +20,7 @@ const phoneAuth = require('./lib/phoneAuth');
 const emailAuth = require('./lib/emailAuth');
 const { parseStaffResponse } = require('./lib/staffImport');
 const gbpMatch = require('./gbpMatch');
+const stationCap = require('./lib/stationCapacity');
 const { resolveTurnMode, buildTurnValueMap, turnValueForLineName } = require('./lib/turnValue');
 const { normalizeVertical, membershipPlansForVertical } = require('./lib/verticals');
 const kioskSaleLib         = require('./lib/kioskSale');
@@ -2399,6 +2400,30 @@ exports.submitOnlineBooking = onCall({ cors: true }, async (request) => {
     }
   }
 
+  // Station-capacity re-check (authoritative). The slot picker enforces this
+  // client-side, but two racing clients can both pass it — re-verify against
+  // the stored day here. Only runs when the tenant configured station counts.
+  {
+    const bcfgSnap = await db.doc(`tenants/${tenantId}/data/bookingConfig`).get().catch(() => null);
+    const caps = stationCap.stationCaps(bcfgSnap && bcfgSnap.exists ? bcfgSnap.data() : null);
+    if (caps.M < Infinity || caps.P < Infinity) {
+      const dates = [...new Set(apptsIn.map(a => String((a && a.date) || '')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
+      for (const d of dates) {
+        const daySnap = await db.collection(`tenants/${tenantId}/appointments`)
+          .where('date', '==', d).get().catch(() => null);
+        const existing = daySnap ? daySnap.docs.map(x => x.data()) : [];
+        const chk = stationCap.checkStationCapacity({
+          existing,
+          incoming: apptsIn.filter(a => a && a.date === d),
+          caps,
+        });
+        if (!chk.ok) {
+          return { stationFull: true, station: chk.station, date: d };
+        }
+      }
+    }
+  }
+
   // Authoritative IP + geo (never trust client-sent values).
   const meta = extractBookingMeta(request.rawRequest);
   if (!meta.geo && meta.ip) meta.geo = await lookupIpGeo(meta.ip);
@@ -2478,6 +2503,11 @@ exports.getPublicAvailability = onCall({ cors: true }, async (request) => {
       techId:    a.techId || '',
       techName:  a.techName || '',
       status:    a.status || 'scheduled',
+      // Station-use tag ('M'|'P'|'MP'|'') so the slot picker can count
+      // concurrent mani/pedi appointments against the configured station
+      // capacity. Derived server-side (lane field / service names) — the
+      // services array itself stays out of the public slice.
+      st:        stationCap.apptStationUse(a),
     };
   });
   return { appts };
