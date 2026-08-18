@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stationTypeForService, apptStationUse, maxConcurrent,
-  stationCaps, stationFits, arrangeLanes, stationIntervals,
+  stationCaps, stationFits, arrangeLanes, stationIntervals, stationOverruns, buildStationTypeIndex,
 } from './stationCapacity';
 
 describe('stationTypeForService', () => {
@@ -108,5 +108,99 @@ describe('stationIntervals', () => {
   it('derives from services when st is absent', () => {
     const { P } = stationIntervals([{ startTime: '09:00', duration: 40, services: [{ name: 'Spa Pedicure', duration: 40 }] }]);
     expect(P).toEqual([{ s: 540, e: 580 }]);
+  });
+});
+
+describe('stationOverruns', () => {
+  const caps = { M: 2, P: 1, waitTol: 15 };
+  it('finds the overbooked window with its peak', () => {
+    const appts = [
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '10:30', duration: 60, st: 'M' },   // 3rd concurrent 10:30-11:00
+    ];
+    const out = stationOverruns(appts, caps);
+    expect(out).toEqual([{ type: 'M', s: 630, e: 660, peak: 3, cap: 2 }]);
+  });
+  it('no overrun at exactly cap; back-to-back never triggers', () => {
+    const appts = [
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '11:00', duration: 60, st: 'M' },   // starts as the others end
+    ];
+    expect(stationOverruns(appts, caps)).toEqual([]);
+  });
+  it('tracks both station types independently and sorts by start', () => {
+    const appts = [
+      { startTime: '14:00', duration: 30, st: 'P' },
+      { startTime: '14:00', duration: 30, st: 'P' },   // P cap 1 → overrun 14:00-14:30
+      { startTime: '09:00', duration: 30, st: 'M' },
+      { startTime: '09:00', duration: 30, st: 'M' },
+      { startTime: '09:00', duration: 30, st: 'M' },   // M cap 2 → overrun 09:00-09:30
+    ];
+    const out = stationOverruns(appts, caps);
+    expect(out).toEqual([
+      { type: 'M', s: 540, e: 570, peak: 3, cap: 2 },
+      { type: 'P', s: 840, e: 870, peak: 2, cap: 1 },
+    ]);
+  });
+  it('unlimited caps → nothing; cancelled excluded', () => {
+    const appts = [
+      { startTime: '10:00', duration: 60, st: 'P' },
+      { startTime: '10:00', duration: 60, st: 'P', status: 'cancelled' },
+    ];
+    expect(stationOverruns(appts, { M: Infinity, P: Infinity })).toEqual([]);
+    expect(stationOverruns(appts, caps)).toEqual([]);   // only 1 live pedi ≤ cap 1
+  });
+});
+
+describe('buildStationTypeIndex — catalog join for category-only names', () => {
+  const catalog = [
+    { id: 'svc1', name: 'Gel-X', category: 'Manicures' },
+    { id: 'svc2', name: 'Toe Polish Change', category: 'Pedicures' },
+    { id: 'svc3', name: 'Brow Wax', category: 'Waxing' },
+  ];
+  const idx = buildStationTypeIndex(catalog);
+
+  it('classifies lines by id, by name, and by "Service — Option" base name', () => {
+    expect(apptStationUse({ services: [{ id: 'svc1', name: 'Gel-X' }] }, idx)).toBe('M');
+    expect(apptStationUse({ services: [{ name: 'Toe Polish Change' }] }, idx)).toBe('P');
+    expect(apptStationUse({ services: [{ name: 'Gel-X — Long' }] }, idx)).toBe('M');
+    expect(apptStationUse({ services: [{ name: 'Brow Wax' }] }, idx)).toBe('');
+  });
+  it('finds an overrun for category-only names that no regex matches', () => {
+    const appts = [
+      { startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] },
+      { startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] },
+      { startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] },
+    ];
+    expect(stationOverruns(appts, { M: Infinity, P: 2, waitTol: 15 }, idx))
+      .toEqual([{ type: 'P', s: 600, e: 630, peak: 3, cap: 2 }]);
+    expect(stationOverruns(appts, { M: Infinity, P: 2, waitTol: 15 })).toEqual([]); // without the index: blind
+  });
+});
+
+describe('stationOverruns — same-instant handoff stays one window', () => {
+  it('merges windows split by a back-to-back end/start at the same minute', () => {
+    const appts = [
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '10:00', duration: 60, st: 'M' },
+      { startTime: '11:00', duration: 60, st: 'M' },
+      { startTime: '11:00', duration: 60, st: 'M' },
+    ];
+    expect(stationOverruns(appts, { M: 1, P: Infinity, waitTol: 15 }))
+      .toEqual([{ type: 'M', s: 600, e: 720, peak: 2, cap: 1 }]);
+  });
+  it('keeps genuinely separate windows separate', () => {
+    const appts = [
+      { startTime: '10:00', duration: 30, st: 'M' },
+      { startTime: '10:00', duration: 30, st: 'M' },
+      { startTime: '12:00', duration: 30, st: 'M' },
+      { startTime: '12:00', duration: 30, st: 'M' },
+    ];
+    expect(stationOverruns(appts, { M: 1, P: Infinity, waitTol: 15 })).toEqual([
+      { type: 'M', s: 600, e: 630, peak: 2, cap: 1 },
+      { type: 'M', s: 720, e: 750, peak: 2, cap: 1 },
+    ]);
   });
 });

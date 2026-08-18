@@ -17,15 +17,40 @@ function stationTypeForService(svc) {
   return null;
 }
 
+// Catalog index — stored service LINES carry only { id, name }: no category.
+// "Gel-X" / "Toe Polish Change" match no regex, so classification must join
+// back to the services catalog (mirrors the client module).
+function buildStationTypeIndex(services) {
+  const byId = new Map(), byName = new Map();
+  for (const svc of (services || [])) {
+    const t = stationTypeForService(svc);
+    if (!t) continue;
+    if (svc.id) byId.set(svc.id, t);
+    if (svc.name) byName.set(String(svc.name).trim().toLowerCase(), t);
+  }
+  return { byId, byName };
+}
+
+function lineStationType(sv, index) {
+  if (index) {
+    if (sv && sv.id != null && index.byId.has(sv.id)) return index.byId.get(sv.id);
+    const key = String((sv && sv.name) || '').trim().toLowerCase();
+    if (index.byName.has(key)) return index.byName.get(key);
+    const base = key.split('—')[0].trim();       // "Service — Option" lines
+    if (base && index.byName.has(base)) return index.byName.get(base);
+  }
+  return stationTypeForService(sv);
+}
+
 // '' | 'M' | 'P' | 'MP'. The multi-lane booking flow stamps `lane` — trust it;
 // otherwise derive from the service lines (a mixed appt occupies both).
-function apptStationUse(appt) {
+function apptStationUse(appt, index) {
   if (!appt) return '';
   if (appt.lane === 'Manicures') return 'M';
   if (appt.lane === 'Pedicures') return 'P';
   let m = false, p = false;
   for (const sv of (appt.services || [])) {
-    const t = stationTypeForService(sv);
+    const t = lineStationType(sv, index);
     if (t === 'M') m = true;
     else if (t === 'P') p = true;
   }
@@ -73,19 +98,19 @@ function stationCaps(cfg) {
 // `existing` (that day's stored appts) overflow either station?
 // Exact check: union all intervals per station, peak concurrency ≤ cap.
 // Returns { ok: true } or { ok: false, station: 'M'|'P' }.
-function checkStationCapacity({ existing, incoming, caps }) {
+function checkStationCapacity({ existing, incoming, caps, index }) {
   for (const type of ['M', 'P']) {
     const cap = caps[type];
     if (!(cap < Infinity)) continue;
     const ivs = [];
     for (const a of (existing || [])) {
       if (!a || a.status === 'cancelled' || a.status === 'no_show') continue;
-      if (!apptStationUse(a).includes(type)) continue;
+      if (!apptStationUse(a, index).includes(type)) continue;
       const iv = intervalOf(a);
       if (iv) ivs.push(iv);
     }
     for (const a of (incoming || [])) {
-      if (!a || !apptStationUse(a).includes(type)) continue;
+      if (!a || !apptStationUse(a, index).includes(type)) continue;
       const iv = intervalOf(a);
       if (iv) ivs.push(iv);
     }
@@ -96,6 +121,7 @@ function checkStationCapacity({ existing, incoming, caps }) {
 
 module.exports = {
   stationTypeForService,
+  buildStationTypeIndex,
   apptStationUse,
   intervalOf,
   maxConcurrent,

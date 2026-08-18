@@ -2871,6 +2871,11 @@ export async function fetchBookingConfig() {
   return snap.exists() ? snap.data() : { enabled: false };
 }
 
+export function subscribeBookingConfig(callback) {
+  return onSnapshot(BOOKING_CONFIG_REF,
+    s => callback(s.exists() ? s.data() : { enabled: false }),
+    () => callback(null));
+}
 export async function saveBookingConfig(data) {
   await setDoc(BOOKING_CONFIG_REF, { ...data, updatedAt: new Date().toISOString() });
 }

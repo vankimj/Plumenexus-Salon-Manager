@@ -40,6 +40,7 @@ vi.mock('../../lib/firestore', () => {
     storeHoursToWebfrontHours: vi.fn(() => ({})),
     fetchAttendance: arr(), subscribeAttendance: sub(),
     fetchReceiptByApptId: vi.fn(() => Promise.resolve(null)),
+    subscribeBookingConfig: vi.fn((cb) => { cb({ enabled: false }); return () => {}; }),
     fetchTurnRoster: obj(),
   };
 });

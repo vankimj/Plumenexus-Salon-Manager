@@ -2407,6 +2407,10 @@ exports.submitOnlineBooking = onCall({ cors: true }, async (request) => {
     const bcfgSnap = await db.doc(`tenants/${tenantId}/data/bookingConfig`).get().catch(() => null);
     const caps = stationCap.stationCaps(bcfgSnap && bcfgSnap.exists ? bcfgSnap.data() : null);
     if (caps.M < Infinity || caps.P < Infinity) {
+      // Service lines on stored appts carry no category — join back to the
+      // catalog so "Gel-X"/"Toe Polish Change" style names classify correctly.
+      const svcSnap = await db.collection(`tenants/${tenantId}/services`).get().catch(() => null);
+      const stIndex = stationCap.buildStationTypeIndex(svcSnap ? svcSnap.docs.map(x => ({ id: x.id, ...x.data() })) : []);
       const dates = [...new Set(apptsIn.map(a => String((a && a.date) || '')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)))];
       for (const d of dates) {
         const daySnap = await db.collection(`tenants/${tenantId}/appointments`)
@@ -2416,6 +2420,7 @@ exports.submitOnlineBooking = onCall({ cors: true }, async (request) => {
           existing,
           incoming: apptsIn.filter(a => a && a.date === d),
           caps,
+          index: stIndex,
         });
         if (!chk.ok) {
           return { stationFull: true, station: chk.station, date: d };
@@ -2489,6 +2494,10 @@ exports.getPublicAvailability = onCall({ cors: true }, async (request) => {
     .where('date', '>=', dateStart)
     .where('date', '<=', dateEnd)
     .get();
+  // Catalog join for the station-use tag: stored service lines have no
+  // category, so name-only classification would miss "Gel-X"-style services.
+  const svcSnap = await db.collection(`tenants/${tenantId}/services`).get().catch(() => null);
+  const stIndex = stationCap.buildStationTypeIndex(svcSnap ? svcSnap.docs.map(x => ({ id: x.id, ...x.data() })) : []);
   // STRICT minimum slice — no clientName/Phone/Email, no notes, no
   // services-array (services have prices and ids that aren't necessary
   // for availability checks). Cancelled appts skipped client-side too,
@@ -2507,7 +2516,7 @@ exports.getPublicAvailability = onCall({ cors: true }, async (request) => {
       // concurrent mani/pedi appointments against the configured station
       // capacity. Derived server-side (lane field / service names) — the
       // services array itself stays out of the public slice.
-      st:        stationCap.apptStationUse(a),
+      st:        stationCap.apptStationUse(a, stIndex),
     };
   });
   return { appts };

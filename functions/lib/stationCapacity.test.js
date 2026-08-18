@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stationTypeForService, apptStationUse, intervalOf,
-  stationCaps, checkStationCapacity,
+  stationCaps, checkStationCapacity, buildStationTypeIndex,
 } from './stationCapacity.js';
 
 describe('server stationTypeForService / apptStationUse', () => {
@@ -60,5 +60,26 @@ describe('checkStationCapacity', () => {
   it('unlimited when unconfigured', () => {
     const incoming = Array.from({ length: 9 }, () => ({ startTime: '10:00', duration: 60, lane: 'Manicures' }));
     expect(checkStationCapacity({ existing: [], incoming, caps: stationCaps({}) })).toEqual({ ok: true });
+  });
+});
+
+describe('server catalog join', () => {
+  const index = buildStationTypeIndex([
+    { id: 'svc1', name: 'Gel-X', category: 'Manicures' },
+    { id: 'svc2', name: 'Toe Polish Change', category: 'Pedicures' },
+  ]);
+  it('classifies category-only names via the index', () => {
+    expect(apptStationUse({ services: [{ name: 'Gel-X' }] }, index)).toBe('M');
+    expect(apptStationUse({ services: [{ id: 'svc2', name: 'Renamed' }] }, index)).toBe('P');
+  });
+  it('checkStationCapacity catches an overflow of category-only services', () => {
+    const existing = [
+      { startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] },
+      { startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] },
+    ];
+    const incoming = [{ startTime: '10:00', duration: 30, services: [{ name: 'Toe Polish Change', duration: 30 }] }];
+    const caps = stationCaps({ pedicureStations: 2 });
+    expect(checkStationCapacity({ existing, incoming, caps, index })).toEqual({ ok: false, station: 'P' });
+    expect(checkStationCapacity({ existing, incoming, caps })).toEqual({ ok: true }); // blind without index
   });
 });
