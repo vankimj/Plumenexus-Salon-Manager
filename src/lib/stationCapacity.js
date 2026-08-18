@@ -23,18 +23,45 @@ export function stationTypeForService(svc) {
   return null;
 }
 
+// Catalog index for classifying stored appointment service LINES, which carry
+// only { id, name, ... } — no category. Lines like "Gel-X" or "Toe Polish
+// Change" match no /mani|pedi/ regex, so without the catalog's category they'd
+// be invisible to capacity checks. Build once from the services collection.
+export function buildStationTypeIndex(services) {
+  const byId = new Map(), byName = new Map();
+  for (const svc of (services || [])) {
+    const t = stationTypeForService(svc);
+    if (!t) continue;
+    if (svc.id) byId.set(svc.id, t);
+    if (svc.name) byName.set(String(svc.name).trim().toLowerCase(), t);
+  }
+  return { byId, byName };
+}
+
+function lineStationType(sv, index) {
+  if (index) {
+    if (sv && sv.id != null && index.byId.has(sv.id)) return index.byId.get(sv.id);
+    const key = String((sv && sv.name) || '').trim().toLowerCase();
+    // Option lines are "Service — Option"; try the base name too.
+    if (index.byName.has(key)) return index.byName.get(key);
+    const base = key.split('—')[0].trim();
+    if (base && index.byName.has(base)) return index.byName.get(base);
+  }
+  return stationTypeForService(sv);
+}
+
 // Station usage of a whole appointment: '' | 'M' | 'P' | 'MP'. The online
 // multi-lane flow writes `lane` per appointment — trust it (accurate windows);
-// otherwise scan the service lines. An appointment with both mani + pedi lines
-// (admin-created combo) conservatively occupies BOTH stations for its whole
-// duration.
-export function apptStationUse(appt) {
+// otherwise classify the service lines (catalog index first, name regex as
+// fallback). An appointment with both mani + pedi lines (admin-created combo)
+// conservatively occupies BOTH stations for its whole duration.
+export function apptStationUse(appt, index) {
   if (!appt) return '';
   if (appt.lane === 'Manicures') return 'M';
   if (appt.lane === 'Pedicures') return 'P';
   let m = false, p = false;
   for (const sv of (appt.services || [])) {
-    const t = stationTypeForService(sv);
+    const t = lineStationType(sv, index);
     if (t === 'M') m = true;
     else if (t === 'P') p = true;
   }
@@ -113,11 +140,11 @@ export function arrangeLanes({ slot, maniDur, pediDur, shape, waitTol = 15, step
 // needs { startTime:'HH:mm', duration, st? } — st is the server-computed
 // station-use tag ('M'|'P'|'MP') on the public availability feed; fall back to
 // deriving from the full doc when absent (admin surfaces).
-export function stationIntervals(appts) {
+export function stationIntervals(appts, index) {
   const M = [], P = [];
   for (const a of (appts || [])) {
     if (a.status === 'cancelled' || a.status === 'no_show') continue;
-    const use = a.st != null ? a.st : apptStationUse(a);
+    const use = a.st != null ? a.st : apptStationUse(a, index);
     if (!use) continue;
     const [h, m] = String(a.startTime || '0:0').split(':').map(Number);
     const s = (h || 0) * 60 + (m || 0);
@@ -127,4 +154,40 @@ export function stationIntervals(appts) {
     if (use.includes('P')) P.push(iv);
   }
   return { M, P };
+}
+
+// Maximal time windows where a station type is OVERBOOKED — more concurrent
+// appointments than stations. Staff surfaces (schedule grid) bypass the
+// booking-time capacity check on purpose (staff may overbook knowingly);
+// this powers the warning that lets them do it knowingly. Returns
+// [{ type:'M'|'P', s, e, peak, cap }] sorted by start.
+export function stationOverruns(appts, caps, index) {
+  const out = [];
+  const ivsByType = stationIntervals(appts, index);
+  for (const type of ['M', 'P']) {
+    const cap = caps[type];
+    if (!(cap < Infinity)) continue;
+    const events = [];
+    for (const iv of ivsByType[type]) { events.push([iv.s, 1]); events.push([iv.e, -1]); }
+    events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let cur = 0, winStart = null, peak = 0;
+    for (const [t, d] of events) {
+      cur += d;
+      if (cur > cap) {
+        if (winStart == null) { winStart = t; peak = cur; }
+        else if (cur > peak) peak = cur;
+      } else if (winStart != null) {
+        // Merge a same-instant end/start handoff (back-to-back at the same
+        // minute keeps the station continuously over cap — one window, not two).
+        const prev = out.length && out[out.length - 1];
+        if (prev && prev.type === type && prev.e === winStart) {
+          prev.e = t; prev.peak = Math.max(prev.peak, peak);
+        } else {
+          out.push({ type, s: winStart, e: t, peak, cap });
+        }
+        winStart = null; peak = 0;
+      }
+    }
+  }
+  return out.sort((a, b) => a.s - b.s || (a.type === b.type ? 0 : (a.type === 'M' ? -1 : 1)));
 }

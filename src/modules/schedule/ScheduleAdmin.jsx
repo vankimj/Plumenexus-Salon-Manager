@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parsePhoneNumberFromString as lpnParse, AsYouType as AsYouTypeFormatter } from 'libphonenumber-js';
 import { currentLocationId, isMultiLocation, effectiveLocationId, appointmentInLocation, employeeInLocation, subscribeLocations, subscribeCurrentLocation } from '../../lib/locations';
-import { fetchAppointments, fetchAppointmentsByRange, fetchAppointmentById, subscribeToAppointments, subscribeToAppointmentsByRange, createAppointment, saveAppointment, deleteAppointment, deleteRecurringGroup, fetchRecurringGroup, fetchClients, createClient, fetchServices, fetchEmployees, fetchUserPrefs, saveUserPrefs, subscribeQueue, updateWaitlistEntry, removeWaitlistEntry, subscribeTurnRoster, saveTurnRoster, subscribeTimeOff, createTimeOff, updateTimeOff, deleteTimeOff, fetchClientVisits, patchWebfrontConfig, storeHoursToWebfrontHours, fetchAttendance, subscribeAttendance, fetchReceiptByApptId } from '../../lib/firestore';
+import { fetchAppointments, fetchAppointmentsByRange, fetchAppointmentById, subscribeToAppointments, subscribeToAppointmentsByRange, createAppointment, saveAppointment, deleteAppointment, deleteRecurringGroup, fetchRecurringGroup, fetchClients, createClient, fetchServices, fetchEmployees, fetchUserPrefs, saveUserPrefs, subscribeQueue, updateWaitlistEntry, removeWaitlistEntry, subscribeTurnRoster, saveTurnRoster, subscribeTimeOff, createTimeOff, updateTimeOff, deleteTimeOff, fetchClientVisits, patchWebfrontConfig, storeHoursToWebfrontHours, fetchAttendance, subscribeAttendance, fetchReceiptByApptId, subscribeBookingConfig } from '../../lib/firestore';
 import { isSalonOpenNow, clockedInNameSet, clockedInTodayNameSet, techWorkStatus, isScheduledOnDay, attendanceKey } from '../../lib/shiftGate';
 import { bookableWindow, apptDurationMins } from '../../lib/booking';
+import { stationCaps, stationOverruns, buildStationTypeIndex } from '../../lib/stationCapacity';
 import { computeNextOpening, computeSeatStart } from './seatTime';
 import { techApptWindow, buildTechApptHours, daySpanFromTechHours } from '../../lib/apptHours';
 import ClientSearch from './ClientSearch';
@@ -290,6 +291,18 @@ export default function ScheduleAdmin({ onOpenClient } = {}) {
   const [clients,      setClients]     = useState([]);
   const [services,     setServices]    = useState([]);
   const [techs,        setTechs]       = useState(FALLBACK_TECHS);
+  // Station capacity (bookingConfig.manicureStations/pedicureStations). The
+  // schedule deliberately does NOT block on it — staff may overbook knowingly —
+  // but the overrun banner + grid bands make the overbooking visible.
+  const [stationCfg, setStationCfg] = useState(null);
+  useEffect(() => subscribeBookingConfig(setStationCfg), []);
+  // Service lines on stored appts carry no category — join to the loaded
+  // services catalog so "Gel-X"/"Toe Polish Change" style names classify.
+  const stationIndex = useMemo(() => buildStationTypeIndex(services), [services]);
+  const stationOverrunList = useMemo(
+    () => stationOverruns(visibleAppts, stationCaps(stationCfg), stationIndex),
+    [visibleAppts, stationCfg, stationIndex],
+  );
   const [techExtended,     setTechExtended]     = useState({});
   const [showAll,          setShowAll]          = useState(false);
   const [showHours,        setShowHours]        = useState(false);
@@ -1284,6 +1297,19 @@ function openNew(techName, slotMins) {
       )}
 
       {/* Client birthdays banner — day view only */}
+      {/* Station-overrun warning — staff can overbook, but never unknowingly. */}
+      {viewMode === 'day' && stationOverrunList.length > 0 && (
+        <div style={{ background: 'var(--pn-danger-bg, #fef2f2)', border: '1px solid #fecaca', borderRadius: 8, padding: '7px 12px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
+          <span style={{ fontSize: 16 }}>💺</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--pn-danger, #b91c1c)' }}>Stations overbooked:</span>
+          {stationOverrunList.map((o, i) => (
+            <span key={i} style={{ fontSize: 12, color: 'var(--pn-danger, #b91c1c)', background: 'var(--pn-surface)', borderRadius: 20, padding: '2px 10px', border: '1px solid #fecaca' }}>
+              {o.type === 'M' ? '💅' : '🦶'} {o.peak} at once {minsToStr(o.s)}–{minsToStr(o.e)} · only {o.cap} station{o.cap === 1 ? '' : 's'}
+            </span>
+          ))}
+        </div>
+      )}
+
       {viewMode === 'day' && birthdayClients.length > 0 && (
         <div style={{ background: 'var(--pn-warning-bg)', border: '1px solid #FED7AA', borderRadius: 8, padding: '7px 12px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flexShrink: 0 }}>
           <span style={{ fontSize: 16 }}>🎂</span>
@@ -1361,6 +1387,7 @@ function openNew(techName, slotMins) {
           : <DayGrid
               date={date}
               appts={visibleAppts}
+              stationOverrunList={stationOverrunList}
               timeOff={timeOff}
               techs={orderedTechs}
               offToday={offTodaySet}
@@ -1913,7 +1940,7 @@ function WeekGrid({ weekStart, appts, clients, employees, allTechs, onApptClick,
 }
 
 // ── Day grid ──────────────────────────────────────────
-function DayGrid({ date, appts, timeOff = [], techs, offToday, dividerTech, allTechs, clients = [], techExtended, techWindows = {}, empWorkDays, slots, dayStart, walkInOpen, walkInClose, techColWidth, focusedTech, onToggleFocusTech, onSlotClick, onApptClick, onApptReschedule }) {
+function DayGrid({ date, appts, stationOverrunList = [], timeOff = [], techs, offToday, dividerTech, allTechs, clients = [], techExtended, techWindows = {}, empWorkDays, slots, dayStart, walkInOpen, walkInClose, techColWidth, focusedTech, onToggleFocusTech, onSlotClick, onApptClick, onApptReschedule }) {
   // Pointer-event drag-to-reschedule. Works on both mouse and touch
   // (iPad/iPhone) — HTML5 D&D doesn't work on touch devices natively.
   // Dragging happens in two phases:
@@ -2203,6 +2230,22 @@ function DayGrid({ date, appts, timeOff = [], techs, offToday, dividerTech, allT
               );
             })}
           </div>
+          );
+        })}
+
+        {/* Station-overrun bands — translucent red across the overbooked
+            window. zIndex 4 keeps them under every appointment card (cards
+            start at zIndex 5) so cards stay fully readable on top. */}
+        {stationOverrunList.map((o, i) => {
+          const gridEnd = dayStart + slots.length * 30;
+          const s0 = Math.max(o.s, dayStart), e0 = Math.min(o.e, gridEnd);
+          if (e0 <= s0) return null;
+          return (
+            <div key={`ovr-${i}`} style={{ position: 'absolute', top: ((s0 - dayStart) / 30) * SLOT_H, height: ((e0 - s0) / 30) * SLOT_H, left: TIME_COL, right: 0, background: 'rgba(239,68,68,.07)', borderTop: '1px dashed rgba(239,68,68,.55)', borderBottom: '1px dashed rgba(239,68,68,.55)', zIndex: 4, pointerEvents: 'none' }}>
+              <span style={{ position: 'absolute', left: 4, top: 2, fontSize: 9, fontWeight: 700, color: 'var(--pn-danger, #b91c1c)', background: 'var(--pn-surface)', border: '1px solid rgba(239,68,68,.35)', borderRadius: 6, padding: '1px 5px', opacity: .92 }}>
+                {o.type === 'M' ? '💅' : '🦶'} {o.peak}/{o.cap}
+              </span>
+            </div>
           );
         })}
 
