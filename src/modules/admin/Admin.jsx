@@ -1234,6 +1234,47 @@ function BookingSection({ bookingCfg, setBookingCfg }) {
         </div>
       )}
     </Section>
+    <Section title="💅 Stations" keywords="stations manicure pedicure capacity chairs concurrent wait">
+      <div style={{ padding: '12px 16px' }}>
+        <div style={{ fontSize: 11, color: 'var(--pn-text-faint)', marginBottom: 12, lineHeight: 1.5 }}>
+          How many manicure and pedicure stations the salon has. Online booking won't admit more
+          concurrent appointments than there are stations — and for a mani&nbsp;+&nbsp;pedi visit it
+          automatically reorders the services (or adds a short wait) to fit more clients in.
+          <strong> 0 = unlimited</strong> (no station limit).
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--pn-text-muted)', width: 200, flexShrink: 0 }}>💅 Manicure stations</span>
+          <input
+            type="number" min={0} max={50}
+            value={bookingCfg.manicureStations ?? 0}
+            onChange={e => setBookingCfg(c => ({ ...c, manicureStations: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+            onBlur={() => save({})}
+            style={{ width: 70, fontFamily: 'inherit', border: '1px solid var(--pn-border-strong)', borderRadius: 8, padding: '5px 8px', fontSize: 12, outline: 'none', textAlign: 'center' }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--pn-text-muted)', width: 200, flexShrink: 0 }}>🦶 Pedicure stations</span>
+          <input
+            type="number" min={0} max={50}
+            value={bookingCfg.pedicureStations ?? 0}
+            onChange={e => setBookingCfg(c => ({ ...c, pedicureStations: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+            onBlur={() => save({})}
+            style={{ width: 70, fontFamily: 'inherit', border: '1px solid var(--pn-border-strong)', borderRadius: 8, padding: '5px 8px', fontSize: 12, outline: 'none', textAlign: 'center' }}
+          />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--pn-text-muted)', width: 200, flexShrink: 0 }}>⏱ Max wait between services</span>
+          <input
+            type="number" min={0} max={60} step={5}
+            value={bookingCfg.stationWaitToleranceMin ?? 15}
+            onChange={e => setBookingCfg(c => ({ ...c, stationWaitToleranceMin: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+            onBlur={() => save({})}
+            style={{ width: 70, fontFamily: 'inherit', border: '1px solid var(--pn-border-strong)', borderRadius: 8, padding: '5px 8px', fontSize: 12, outline: 'none', textAlign: 'center' }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--pn-text-faint)' }}>minutes a client may wait for the next station on a mani + pedi visit</span>
+        </div>
+      </div>
+    </Section>
     <Section title="🔁 Walk-in Queue & Tech Assignment" keywords="walk-in queue turn rotation tech assignment auto assign no preference">
       <AutoAssignSection
         method={bookingCfg.assignmentMethod || DEFAULT_ASSIGNMENT_METHOD}

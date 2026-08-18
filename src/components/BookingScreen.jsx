@@ -33,6 +33,7 @@ import {
 import { pickTech, startOfWeek, endOfWeek, DEFAULT_ASSIGNMENT_METHOD } from '../lib/techAssignment';
 import { getEffectiveFlow } from '../lib/bookingFlow';
 import { findGroupSlots, computeLanes } from '../lib/groupBooking';
+import { stationCaps, stationFits, stationIntervals, arrangeLanes, stationTypeForService, maxConcurrent } from '../lib/stationCapacity';
 
 // ── constants ──────────────────────────────────────────
 
@@ -239,6 +240,9 @@ export default function BookingScreen() {
   const [cartTechByLane, setCartTechByLane] = useState({ Manicures: undefined, Pedicures: undefined });
   const [cartDate, setCartDate] = useState('');
   const [cartSlot, setCartSlot] = useState(null);
+  // Station-juggled lane arrangement for the selected slot (multi-lane carts).
+  // Self-validating: handleBook only honors it when arrangement.slot === cartSlot.
+  const [cartArrangement, setCartArrangement] = useState(null);
   // Per-date appointment cache for the slot picker.
   const [apptsByDate, setApptsByDate] = useState({});
   // ── Group booking (2–6 people, distinct techs, ±15 min) ──
@@ -824,17 +828,27 @@ export default function BookingScreen() {
         const pediItems = lanes.Pedicures;
         // Tier 1 toggle multiLaneShape: 'back-to-back' (pedi starts after
         // mani finishes) or 'simultaneous' (both start at the same time).
+        // A station-juggled arrangement from the slot picker (order swapped /
+        // short wait inserted to fit the station capacity) overrides both —
+        // the booking must write the exact times the client was shown.
+        const arr = (cartArrangement && cartArrangement.slot === cartSlot) ? cartArrangement : null;
         const simultaneous = flowCfg.multiLaneShape === 'simultaneous';
-        const { tech: maniTech, requestType: maniReq } = await resolveTechForItems(maniItems, cartTechByLane.Manicures, cartSlot);
+        const maniStart = arr ? arr.maniStart : cartSlot;
+        const { tech: maniTech, requestType: maniReq } = await resolveTechForItems(maniItems, cartTechByLane.Manicures, maniStart);
         const maniDur = cartTotalDuration(maniItems, removalDur, maniTech);
-        const pediStart = simultaneous ? cartSlot : (cartSlot + maniDur);
+        const pediStart = arr ? arr.pediStart : (simultaneous ? cartSlot : (cartSlot + maniDur));
         const { tech: pediTech, requestType: pediReq } = await resolveTechForItems(pediItems, cartTechByLane.Pedicures, pediStart);
         const groupId = `bg_${Date.now()}_${Math.floor(Math.random()*9999)}`;
-        const maniAppt = { ...makeApptForLane(maniItems, maniTech, maniReq, cartSlot), bookingGroupId: groupId, lane: 'Manicures', laneShape: flowCfg.multiLaneShape };
-        const pediAppt = { ...makeApptForLane(pediItems, pediTech, pediReq, pediStart), bookingGroupId: groupId, lane: 'Pedicures', laneShape: flowCfg.multiLaneShape };
-        apptsToWrite.push(maniAppt, pediAppt);
-        primaryTech = maniTech;
-        primaryAppt = maniAppt;
+        const laneShape = arr ? (arr.order === 'simultaneous' ? 'simultaneous' : 'back-to-back') : flowCfg.multiLaneShape;
+        const firstAppt = arr && arr.order === 'pedi-first' ? 'pedi' : 'mani';
+        const maniAppt = { ...makeApptForLane(maniItems, maniTech, maniReq, maniStart), bookingGroupId: groupId, lane: 'Manicures', laneShape };
+        const pediAppt = { ...makeApptForLane(pediItems, pediTech, pediReq, pediStart), bookingGroupId: groupId, lane: 'Pedicures', laneShape };
+        // Push in visit order (first service first) so the confirmation screen
+        // and the deposit stamp (server uses index 0) follow the real start.
+        if (firstAppt === 'pedi') apptsToWrite.push(pediAppt, maniAppt);
+        else apptsToWrite.push(maniAppt, pediAppt);
+        primaryTech = firstAppt === 'pedi' ? pediTech : maniTech;
+        primaryAppt = firstAppt === 'pedi' ? pediAppt  : maniAppt;
       } else {
         // Single-lane: original flow, one tech, one appointment.
         const { tech, requestType } = await resolveTechForItems(cart, cartTech, cartSlot);
@@ -869,6 +883,17 @@ export default function BookingScreen() {
       }
       if (subRes?.data?.cardRequired) {
         setBookingError('This salon requires a card on file before booking. Please refresh and try again, or call us.');
+        setSubmitting(false);
+        return;
+      }
+      if (subRes?.data?.stationFull) {
+        // Race: another client booked the last station between our slot check
+        // and the write. Drop the cached day so re-picking shows fresh slots.
+        const label = subRes.data.station === 'P' ? 'pedicure stations are' : 'manicure stations are';
+        setBookingError(`That time just filled up — all ${label} taken then. Please pick another time.`);
+        setApptsByDate(prev => { const next = { ...prev }; delete next[cartDate]; return next; });
+        setCartSlot(null);
+        setCartArrangement(null);
         setSubmitting(false);
         return;
       }
@@ -934,6 +959,35 @@ export default function BookingScreen() {
         preferredDate: groupPreferredDate || null,
         today: start, nowMins, windowStart: 9 * 60, windowEnd: 20 * 60,
       });
+      // Station-capacity post-check: drop group slots whose combined lanes
+      // (plus the day's existing appointments) would overflow the configured
+      // mani/pedi station counts. Guests' lanes mirror computeLanes so each
+      // assignment's station type comes from its own lane's services.
+      const caps = stationCaps(cfg);
+      if (result?.slots?.length && (caps.M < Infinity || caps.P < Infinity)) {
+        const laneUse = groupGuests.map(g => computeLanes(g.cart, techs).map(l => {
+          let m = false, p = false;
+          for (const it of (l.items || [])) {
+            const t = stationTypeForService(it.service);
+            if (t === 'M') m = true; else if (t === 'P') p = true;
+          }
+          return (m ? 'M' : '') + (p ? 'P' : '');
+        }));
+        result.slots = result.slots.filter(s => {
+          const existing = stationIntervals(byDate[s.date] || []);
+          for (const type of ['M', 'P']) {
+            if (!(caps[type] < Infinity)) continue;
+            const ivs = [...existing[type]];
+            for (const a of s.assignments) {
+              if ((laneUse[a.guestIdx]?.[a.lane] || '').includes(type)) {
+                ivs.push({ s: a.startMins, e: a.startMins + a.durMins });
+              }
+            }
+            if (maxConcurrent(ivs, 0, 24 * 60) > caps[type]) return false;
+          }
+          return true;
+        });
+      }
       setGroupResults(result);
     } finally { setGroupSearching(false); }
   }
@@ -1040,6 +1094,12 @@ export default function BookingScreen() {
       if (subRes?.data?.banned)         { setBookingError("We're not able to accept this booking online. Please call the salon."); setSubmitting(false); return; }
       if (subRes?.data?.velocityBlocked){ setBookingError("We've received a lot of booking activity from your connection. Please try again later or call the salon."); setSubmitting(false); return; }
       if (subRes?.data?.cardRequired)   { setBookingError('This salon requires a card on file before booking. Please refresh and try again, or call us.'); setSubmitting(false); return; }
+      if (subRes?.data?.stationFull) {
+        const label = subRes.data.station === 'P' ? 'pedicure' : 'manicure';
+        setBookingError(`That time just filled up — not enough ${label} stations free anymore. Please search again for a new time.`);
+        setGroupApptsByDate(null); setGroupResults(null); setGroupChoice(null);
+        setSubmitting(false); return;
+      }
       const newIds = subRes?.data?.ids || [];
       const written = apptsToWrite.map((a, i) => ({ ...a, id: newIds[i] }));
       setConfirmed({ ...written[0], _tech: techById[groupChoice.assignments[0].techId] || null, _cartItems: groupGuests[0].cart, _allAppts: written, _group: written });
@@ -1222,8 +1282,10 @@ export default function BookingScreen() {
             cart={cart} cartTech={cartTech} cartTechByLane={cartTechByLane} allTechs={locTechs}
             cartDate={cartDate} setCartDate={setCartDate}
             cartSlot={cartSlot} setCartSlot={setCartSlot}
+            setCartArrangement={setCartArrangement}
             apptsByDate={apptsByDate} ensureApptsForDate={ensureApptsForDate}
             removalDur={15}
+            bookingCfg={cfg}
             bookingHours={webCfg?.bookingHours}
             onProceed={() => {
               const haveAll = form.name.trim() && form.phone.trim();
@@ -1266,6 +1328,7 @@ export default function BookingScreen() {
             cart={cart} allTechs={locTechs}
             cartTech={cartTech} cartTechByLane={cartTechByLane}
             cartDate={cartDate} cartSlot={cartSlot}
+            cartArrangement={cartArrangement}
             apptsByDate={apptsByDate}
             form={form} submitting={submitting} bookingError={bookingError}
             editorial={webCfg?.layout === 'merakiSite'}
@@ -2241,7 +2304,7 @@ function TechCard({ tech, selected, onSelect }) {
 }
 
 // ── Step 3: Pick a date + start time for the whole cart ─
-function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, setCartDate, cartSlot, setCartSlot, apptsByDate, ensureApptsForDate, removalDur, onProceed, onBack, flowCfg, bookingHours }) {
+function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, setCartDate, cartSlot, setCartSlot, setCartArrangement, apptsByDate, ensureApptsForDate, removalDur, onProceed, onBack, flowCfg, bookingCfg, bookingHours }) {
   const minLead = Math.max(0, Number(flowCfg?.minLeadTimeMinutes) || 0);
   const maxDays = Math.max(1, Number(flowCfg?.maxLeadDays) || 30);
   const multiLane = isMultiLane(cart);
@@ -2277,7 +2340,9 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
   const bWindow = useMemo(() => bookableWindow(bookingHours || {}, dow), [bookingHours, dow]);
   const allSlots = useMemo(() => getSlots(totalDur, bWindow), [totalDur, bWindow]);
 
-  useEffect(() => { if (cartDate) ensureApptsForDate(cartDate); }, [cartDate]); // eslint-disable-line
+  // dayAppts in deps: a stationFull race drops the cached day, and this
+  // re-fetches it so the picker shows fresh slots instead of a stuck spinner.
+  useEffect(() => { if (cartDate && dayAppts == null) ensureApptsForDate(cartDate); }, [cartDate, dayAppts]); // eslint-disable-line
 
   // Slot availability — single-lane: any eligible tech free for the whole
   // span. Multi-lane: mani-tech free in [slot, slot+maniDur] AND pedi-tech
@@ -2329,40 +2394,65 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
     const now = new Date();
     const cutoff = now.getHours() * 60 + now.getMinutes() + minLead;
 
+    // Station capacity (mani/pedi station counts, 0/unset = unlimited). The
+    // day's busy intervals per station come from the availability feed's `st`
+    // tag; a candidate slot must leave one station free of its type.
+    const caps = stationCaps(bookingCfg);
+    const stIvs = stationIntervals(dayAppts);
+    const stFits = (type, start, dur) =>
+      stationFits(type === 'M' ? stIvs.M : stIvs.P, start, dur, type === 'M' ? caps.M : caps.P);
+    // Single-lane carts: which station type(s) the whole visit occupies.
+    const singleUse = multiLane ? [] : [...new Set(cart.map(i => stationTypeForService(i.service)).filter(Boolean))];
+
+    // For a multi-lane cart, a slot is available when SOME arrangement of the
+    // two lanes fits both the techs and the stations. arrangeLanes tries the
+    // configured shape first, then swaps the order (pedi-first), then inserts
+    // a short wait (up to the configured tolerance) so a full station doesn't
+    // kill the slot outright. Returns the arrangement (or null) — the map
+    // stores it so the booking write uses the exact juggled times.
     const isAvailable = (slotMins) => {
       // Min-lead enforcement: if the chosen date is today, hide slots that
       // start before now+minLead.
       if (isTodayDate && slotMins < cutoff) return false;
       if (multiLane) {
-        // Mani window starts at the slot.
         const maniTech = cartTechByLane?.Manicures || null;
-        const checkMani = (t) => freeAt(t, slotMins, cartTotalDuration(maniItems, removalDur, t));
-        const maniOk = maniTech ? checkMani(maniTech) : maniEligible.some(checkMani);
-        if (!maniOk) return false;
-        // Pedi window start depends on shape: same time (simultaneous) or
-        // after mani finishes (back-to-back).
-        const maniRep = maniTech || maniEligible.find(checkMani) || maniEligible[0];
-        const maniDur = cartTotalDuration(maniItems, removalDur, maniRep);
-        const pediStart = simultaneous ? slotMins : (slotMins + maniDur);
         const pediTech = cartTechByLane?.Pedicures || null;
-        const checkPedi = (t) => freeAt(t, pediStart, cartTotalDuration(pediItems, removalDur, t));
-        const pediOk = pediTech ? checkPedi(pediTech) : pediEligible.some(checkPedi);
-        if (!pediOk) return false;
-        // For simultaneous: same tech can't be both mani AND pedi at the
-        // overlap. If both lanes ended up with the same person, reject.
-        if (simultaneous && maniTech && pediTech && maniTech.id === pediTech.id) return false;
-        return true;
+        // Simultaneous is impossible when both lanes resolve to one person.
+        const effShape = (simultaneous && maniTech && pediTech && maniTech.id === pediTech.id)
+          ? 'back-to-back' : shape;
+        const canPlace = (type, start, dur) => {
+          if (!stFits(type, start, dur)) return false;
+          if (type === 'M') {
+            const chk = (t) => freeAt(t, start, cartTotalDuration(maniItems, removalDur, t));
+            return maniTech ? chk(maniTech) : maniEligible.some(chk);
+          }
+          const chk = (t) => freeAt(t, start, cartTotalDuration(pediItems, removalDur, t));
+          return pediTech ? chk(pediTech) : pediEligible.some(chk);
+        };
+        return arrangeLanes({
+          slot: slotMins, maniDur: maniDurRep, pediDur: pediDurRep,
+          shape: effShape, waitTol: caps.waitTol, step: 5,
+          canPlace, maxEnd: bWindow?.close,
+        }) || false;
       }
-      if (cartTech) return freeAt(cartTech, slotMins, totalDur);
-      return eligible.some(t => freeAt(t, slotMins, cartTotalDuration(cart, removalDur, t)));
+      const techOk = cartTech
+        ? freeAt(cartTech, slotMins, totalDur)
+        : eligible.some(t => freeAt(t, slotMins, cartTotalDuration(cart, removalDur, t)));
+      if (!techOk) return false;
+      return singleUse.every(type => stFits(type, slotMins, totalDur));
     };
 
     for (const s of allSlots) map.set(s, isAvailable(s));
     return map;
   }, [dayAppts, cartDate, minLead, multiLane, cartTech, cartTechByLane, eligible,
-      maniItems, pediItems, maniEligible, pediEligible, simultaneous, removalDur, totalDur, cart, allSlots]);
+      maniItems, pediItems, maniEligible, pediEligible, simultaneous, shape, removalDur,
+      totalDur, maniDurRep, pediDurRep, cart, allSlots, bookingCfg, bWindow]);
 
   const hasAny = dayAppts && allSlots.some(s => availBySlot.get(s));
+  // The selected slot's juggled arrangement (multi-lane only) — shown to the
+  // client so a swapped order / short wait is never a surprise at the salon.
+  const selArr = cartSlot != null ? availBySlot.get(cartSlot) : null;
+  const juggled = selArr && typeof selArr === 'object' && (selArr.order === 'pedi-first' || selArr.gap > 0);
   const techLabel = multiLane
     ? `${cartTechByLane?.Manicures?.name || 'any stylist'} (mani) & ${cartTechByLane?.Pedicures?.name || 'any stylist'} (pedi)`
     : (cartTech ? cartTech.name : 'No preference');
@@ -2372,7 +2462,7 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
     <div style={{ maxWidth: 720, margin: '0 auto' }}>
       <StepTitle>Pick a date &amp; start time</StepTitle>
       <div style={{ fontSize: 13, color: '#888', marginTop: -10, marginBottom: 18, lineHeight: 1.5 }}>
-        Your {cartLabel} ({totalDur} min total){multiLane ? ' will be done back-to-back, mani first then pedi' : ' will be done back-to-back'} with <strong>{techLabel}</strong>.
+        Your {cartLabel} ({totalDur} min total){multiLane ? ' will be done back-to-back' : ' will be done back-to-back'} with <strong>{techLabel}</strong>.
       </div>
 
       <div style={{ background: '#fff', border: '1px solid #e8e8e8', borderRadius: 14, padding: 16 }}>
@@ -2395,7 +2485,15 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
                       const avail = availBySlot.get(m);
                       const isSel = cartSlot === m;
                       return (
-                        <button key={m} onClick={() => avail && setCartSlot(m)} disabled={!avail}
+                        <button key={m}
+                          onClick={() => {
+                            if (!avail) return;
+                            setCartSlot(m);
+                            // Multi-lane: remember the juggled arrangement so the
+                            // booking writes the exact times shown to the client.
+                            setCartArrangement?.(typeof avail === 'object' ? { ...avail, slot: m } : null);
+                          }}
+                          disabled={!avail}
                           style={{
                             padding: '12px 4px', borderRadius: 10, fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
                             border: `1.5px solid ${isSel ? 'var(--tm-primary, #2D7A5F)' : avail ? '#c3e6d8' : '#ececec'}`,
@@ -2419,6 +2517,14 @@ function Step3PickSlot({ cart, cartTech, cartTechByLane, allTechs, cartDate, set
           )}
         </div>
       </div>
+
+      {juggled && (
+        <div style={{ marginTop: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, color: '#92400e', lineHeight: 1.5 }}>
+          {selArr.order === 'pedi-first'
+            ? <>💡 To fit you in at this time we'll do your <strong>pedicure first</strong>, then your manicure{selArr.gap > 0 ? <> (with a short ~{selArr.gap} min wait in between)</> : null}.</>
+            : <>💡 To fit you in at this time there'll be a short <strong>~{selArr.gap} min wait</strong> between your manicure and pedicure while a pedicure station opens up.</>}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
         <button onClick={onBack} style={{ flex: 1, padding: '14px', borderRadius: 12, border: '1px solid #d8d8d8', background: '#fff', color: '#555', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -2593,7 +2699,7 @@ function Step4Info({
 }
 
 // ── Step 5: Confirm (multi-item) ────────────────────────
-function Step5Confirm({ cart, allTechs, cartTech, cartTechByLane, cartDate, cartSlot, apptsByDate, form, submitting, bookingError, editorial, onConfirm, onBack, onEditInfo, flowCfg, gUser }) {
+function Step5Confirm({ cart, allTechs, cartTech, cartTechByLane, cartDate, cartSlot, cartArrangement, apptsByDate, form, submitting, bookingError, editorial, onConfirm, onBack, onEditInfo, flowCfg, gUser }) {
   // Tier 1 toggles read here:
   //   • confirmCtaLabel — button text below
   //   • requireSignIn   — block submit unless gUser is set
@@ -2632,8 +2738,12 @@ function Step5Confirm({ cart, allTechs, cartTech, cartTechByLane, cartDate, cart
     const pediTech = resolveLaneTech(pediItems, cartTechByLane?.Pedicures);
     const maniDur  = cartTotalDuration(maniItems, removalDur, maniTech);
     const pediDur  = cartTotalDuration(pediItems, removalDur, pediTech);
-    const pediStart = simultaneous ? cartSlot : (cartSlot + maniDur);
-    maniLaneInfo = { items: maniItems, tech: maniTech, start: cartSlot, end: cartSlot + maniDur, dur: maniDur };
+    // A station-juggled arrangement (order swapped / wait inserted by the slot
+    // picker) dictates the real lane times — show exactly what will be booked.
+    const arr = (cartArrangement && cartArrangement.slot === cartSlot) ? cartArrangement : null;
+    const maniStart = arr ? arr.maniStart : cartSlot;
+    const pediStart = arr ? arr.pediStart : (simultaneous ? cartSlot : (cartSlot + maniDur));
+    maniLaneInfo = { items: maniItems, tech: maniTech, start: maniStart, end: maniStart + maniDur, dur: maniDur };
     pediLaneInfo = { items: pediItems, tech: pediTech, start: pediStart, end: pediStart + pediDur, dur: pediDur };
   }
   // Total duration: multi-lane sums or maxes the two lanes' actual durations
@@ -2641,7 +2751,9 @@ function Step5Confirm({ cart, allTechs, cartTech, cartTechByLane, cartDate, cart
   const totalDur = multiLane
     ? (simultaneous ? Math.max(maniLaneInfo.dur, pediLaneInfo.dur) : (maniLaneInfo.dur + pediLaneInfo.dur))
     : cartTotalDuration(cart, removalDur, assignedTech);
-  const endSlot = (cartSlot ?? 0) + totalDur;
+  const endSlot = multiLane
+    ? Math.max(maniLaneInfo.end, pediLaneInfo.end)
+    : (cartSlot ?? 0) + totalDur;
 
   // "No preference" must stay invisible to the customer — we still resolve a
   // tech above for an accurate duration/time estimate, but the booking is
