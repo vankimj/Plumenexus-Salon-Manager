@@ -27,13 +27,23 @@
 
 const FIREBASE_HOST = 'plumenexus-prod.web.app';
 
+// Subdomains that are separate Firebase Hosting sites (other Plume Nexus
+// apps), not salon tenants. Belt-and-suspenders: trips.plumenexus.com is
+// served via a specific grey-cloud CNAME + Firebase customDomain (the
+// mesapicks/admin pattern), so this Worker normally never sees it — the map
+// only matters if someone flips that DNS record back to proxied.
+const HOST_MAP = {
+  'trips.plumenexus.com': 'plumenexus-trips.web.app',
+};
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     const originalHost = url.hostname;
-    const upstreamUrl = `https://${FIREBASE_HOST}${url.pathname}${url.search}`;
+    const upstreamHost = HOST_MAP[originalHost] || FIREBASE_HOST;
+    const upstreamUrl = `https://${upstreamHost}${url.pathname}${url.search}`;
     const upstreamHeaders = new Headers(request.headers);
-    upstreamHeaders.set('host', FIREBASE_HOST);
+    upstreamHeaders.set('host', upstreamHost);
     upstreamHeaders.set('x-forwarded-host', originalHost);
     const upstreamReq = new Request(upstreamUrl, {
       method:  request.method,
