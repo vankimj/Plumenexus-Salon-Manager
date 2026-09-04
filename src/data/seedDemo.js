@@ -669,29 +669,44 @@ function generateClients() {
   return clients;
 }
 
-// ── Generate 500 celebrity clients ──────────────────────
+// ── Generate 500 VIP clients (fictional) ────────────────
+// Kept `_celebrity` for the VIP booking behavior (90% book the same tech, extra
+// past/future appts), but every IDENTITY field is invented — no real people —
+// so a demo re-seed can never resurrect celebrity names/handles/emails. The
+// CELEBRITIES arrays are iterated only for the count + their generic
+// randomuser.me stock portraits (not real celebrity photos). Deterministic by
+// index → re-seeds are stable; (first,last) pairs are unique for i < 500.
+const VIP_FIRST = ['Amara','Bella','Camille','Daphne','Elena','Farrah','Gianna','Harper','Imani','Jolene','Keira','Luna','Maeve','Nadia','Opal','Priya','Quinn','Rosa','Sienna','Talia','Uma','Vera','Willa','Ximena','Yara','Zoe','Ada','Bree','Celestine','Dina','Esme','Freya','Gemma','Hazel','Iris','Jade','Kara','Lena','Mira','Nova','Odessa','Paloma','Rain','Sasha','Tessa','Una','Vivian','Wren','Yasmin','Zara','Anya','Blair','Cora','Delia','Eden','Fiona','Greta','Hana','Ines','June','Kaia','Lila','Mona','Nina','Orla','Pearl','Reese','Skylar','Thea','Ursula','Violet','Winnie','Yvette','Zelda','April','Brooke','Clara','Dawn','Elsa','Faye','Gwen','Holly','Ivy','Joan','Kelsey','Leah','Maren','Noelle','Octavia','Piper','Ruby','Stella','Tara','Unity','Wanda','Alba','Beatrix','Coral','Dot','Effie','Flora'];
+const VIP_LAST  = ['Ashford','Bellamy','Calloway','Delacroix','Ellington','Fairbanks','Galloway','Hartwell','Ingram','Juniper','Kensington','Larkspur','Merriweather','Northcott','Oakhurst','Pemberton','Quimby','Rosewood','Sterling','Thornbury','Underhill','Vandermeer','Westbrook','Yarrow','Ashby','Birchwood','Colefax','Dunmore','Everhart','Foxglove','Greenfield','Hollis','Irving','Jessop','Kingsley','Lockwood','Marlowe','Nightingale','Ormond','Prescott','Quill','Redfern','Silverton','Trellis','Vale','Whitmore','Yorke','Alder','Bramble','Crestwood'];
+const VIP_NOTES = ['VIP regular — books the same tech every visit, tips generously','Loves seasonal colors — always asks what is new on the wall','Prefers quiet appointments, brings her own playlist','Gel-x coffin devotee — photographs every set','Short almond, nude tones — in and out on her lunch break','Always books the last slot of the day, never rushes','Chrome finish fan — loves trying new powders','French tips only, has kept the same look for years','Loves 3D art and crystals — allow extra time','Books pedicure combos monthly, very loyal','Sensitive cuticles — gentle prep, noted on file','Rebooks at checkout every single time','Big birthday-month energy — always wants something festive','Refers friends constantly','Prefers dip powder, natural length','Long stiletto, bold reds — signature look','Milky white sets only — very consistent','Matches nails to her handbag','French ombré fan, books 3 weeks out','Nail-art enthusiast — brings inspo photos'];
 function generateCelebrities() {
-  return [...CELEBRITIES, ...CELEBRITIES_2, ...CELEBRITIES_3, ...CELEBRITIES_4, ...CELEBRITIES_5].map((celeb, i) => ({
-    name:       celeb.name,
-    phone:      `(614) 555-${String(5001 + i).padStart(4, '0')}`,
-    email:      `${celeb.name.split(' ')[0].toLowerCase().replace(/[^a-z]/g, '')}@vip.com`,
-    address:    '',
-    birthday:   celeb.birthday || '',
-    notes:      celeb.notes || '',
-    allergies:  pickDemoAllergies(0.18),   // ~18% of celebs — VIPs are pickier
-    picture:    celeb.picture || '',
-    instagram:  celeb.instagram || '',
-    facebook:   '',
-    tiktok:     celeb.tiktok || '',
-    venmo:      '',
-    instagramTags: [],
-    googleReviews: [],
-    visits: [],
-    // Celebrities are VIPs — 90% always book the same tech.
-    favoriteTech: Math.random() < 0.9 ? TECH_NAMES[i % TECH_NAMES.length] : '',
-    _demo: true,
-    _celebrity: true,
-  }));
+  return [...CELEBRITIES, ...CELEBRITIES_2, ...CELEBRITIES_3, ...CELEBRITIES_4, ...CELEBRITIES_5].map((celeb, i) => {
+    const first = VIP_FIRST[i % VIP_FIRST.length];
+    const last  = VIP_LAST[(Math.floor(i / VIP_FIRST.length)) % VIP_LAST.length];
+    const name  = `${first} ${last}`;
+    const slug  = `${first}.${last}`.toLowerCase();
+    return {
+      name,
+      phone:      `(614) 555-${String(5001 + i).padStart(4, '0')}`,
+      email:      `${slug}@vip.example.com`,   // RFC-reserved, non-deliverable
+      address:    '',
+      birthday:   `${1975 + (i % 25)}-${String(1 + ((i * 7 + 3) % 12)).padStart(2, '0')}-${String(1 + ((i * 11 + 5) % 28)).padStart(2, '0')}`,
+      notes:      VIP_NOTES[i % VIP_NOTES.length],
+      allergies:  pickDemoAllergies(0.18),   // ~18% of VIPs — pickier
+      picture:    celeb.picture || '',       // generic randomuser.me stock portrait
+      instagram:  `@${slug.replace('.', '')}`,
+      facebook:   '',
+      tiktok:     '',
+      venmo:      '',
+      instagramTags: [],
+      googleReviews: [],
+      visits: [],
+      // VIPs — 90% always book the same tech.
+      favoriteTech: Math.random() < 0.9 ? TECH_NAMES[i % TECH_NAMES.length] : '',
+      _demo: true,
+      _celebrity: true,
+    };
+  });
 }
 
 // ── Service templates ───────────────────────────────────
@@ -727,8 +742,8 @@ function pickService() {
 // only if no employees exist yet (e.g. fresh tenant). seedDemoData
 // rebinds this via setSeedTechNames() before generating appointments.
 const FALLBACK_TECH_NAMES = [
-  'Yasmin D','Audriana L','Samantha T','Tess D','Elizabeth L',
-  'Yan W','Jen T','Marisela I','Ana P','Jenesis B',
+  'Priya S','Talia W','Wren H','Lena M','Nova P',
+  'Esme D','Ivy R','Nadia K','Zara L','Cora B',
 ];
 let TECH_NAMES = FALLBACK_TECH_NAMES;
 function setSeedTechNames(names) {

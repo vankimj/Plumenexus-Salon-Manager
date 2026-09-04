@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6 Site Plans — 29950 S Highway 1, Gualala</title>
+<style>
+  :root{
+    --ink:#3a3a3a; --muted:#8a8375; --paper:#fbf8f1; --line:#e4ddcb;
+    --accent:#c4674a; --green:#5f7d4f;
+  }
+  *{box-sizing:border-box}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);
+       margin:0;padding:32px 18px 60px;background:#f4f0e6;}
+  .wrap{max-width:1240px;margin:0 auto;}
+  section>p,section>ol{max-width:84ch;}
+  h1{font-size:26px;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:6px;}
+  .conds{font-size:13px;color:var(--muted);margin-bottom:28px;}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:14px;
+          padding:24px 26px;margin-bottom:30px;}
+  h2{font-size:19px;margin:0 0 2px;display:flex;align-items:center;gap:10px;}
+  .planno{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
+          border-radius:50%;background:var(--accent);color:#fff;font-size:14px;font-weight:700;flex:0 0 26px;}
+  .badges{margin:6px 0 10px;}
+  .badge{display:inline-block;font-size:11.5px;padding:2px 9px;border-radius:20px;
+         border:1px solid var(--line);background:#fff;color:var(--muted);margin-right:6px;}
+  .concept{font-size:14px;line-height:1.5;margin:0 0 14px;}
+  .plan-svg svg{width:100%;height:auto;display:block;border-radius:10px;}
+  h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:20px 0 10px;}
+  .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;}
+  figure{margin:0;}
+  figure img{width:100%;height:170px;object-fit:cover;border-radius:8px;border:1px solid var(--line);background:#eee;cursor:zoom-in;}
+  figcaption{font-size:11.5px;line-height:1.35;margin-top:4px;}
+  figcaption em{color:var(--muted);font-style:italic;display:block;font-size:10.5px;}
+  .buy{font-size:12.5px;color:var(--muted);border-top:1px dashed var(--line);margin-top:16px;padding-top:12px;line-height:1.5;}
+  .render{margin-top:18px;background:#f2ede1;border:1px solid var(--line);border-radius:10px;padding:14px 16px;}
+  .render h4{margin:0 0 10px;font-size:13px;}
+  .render img{width:100%;max-height:460px;object-fit:cover;border-radius:8px;margin-bottom:6px;cursor:zoom-in;}
+  .render .cap{font-size:11px;color:var(--muted);margin-bottom:12px;}
+  .prompt{font-size:12px;line-height:1.55;background:#fff;border:1px dashed var(--line);border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;}
+  .copybtn{margin-top:8px;font-size:12px;padding:4px 14px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;color:var(--ink);}
+  .foot{font-size:12px;color:var(--muted);line-height:1.6;margin-top:8px;}
+  .foot a{color:#7a6a4f;}
+  .plist{list-style:none;padding:0;margin:0;font-size:13px;}
+  .plist li{padding:6px 0;border-bottom:1px solid var(--line);line-height:1.4;}
+  .plist li:last-child{border:none;}
+  .plist b{color:var(--ink);}
+  .plist span{color:var(--muted);font-style:italic;}
+  .swaps{font-size:12.5px;color:var(--muted);background:#f2ede1;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-top:12px;line-height:1.55;}
+  .swaps b{color:var(--ink);}
+  .swaps .sh{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--green);font-weight:700;display:block;margin-bottom:6px;}
+  .plib{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;}
+  .pcard{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fff;}
+  .pcard h4{margin:0 0 2px;font-size:14px;}
+  .pcard .vibe{font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.4;}
+  .care{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;margin-bottom:9px;text-transform:uppercase;letter-spacing:.03em;}
+  .care-vlow{background:#e6efdc;color:#4c6440;}
+  .care-low{background:#f3ead1;color:#8a6a2d;}
+  .pcard ul{margin:0;padding-left:16px;font-size:12.5px;line-height:1.5;}
+  .pcard li span{color:var(--muted);font-style:italic;}
+  .carelegend{font-size:12px;color:var(--muted);margin:0 0 16px;line-height:1.5;}
+  table.cost{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px;}
+  table.cost th,table.cost td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  table.cost th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  table.cost td.opt{font-weight:600;}
+  table.cost td .sub{display:block;font-size:11px;color:var(--muted);font-weight:400;}
+  table.cost .diy{color:#4c6440;font-weight:600;} table.cost .pro{color:#8a6a2d;font-weight:600;}
+  table.cost tr.tot td{border-top:2px solid var(--ink);border-bottom:none;padding-top:11px;font-weight:700;background:#f6f2e6;}
+  table.cost tr.tot td.lbl{font-size:13.5px;}
+  table.cost tr.sub2 td{border-bottom:none;padding-top:2px;font-size:12px;color:var(--muted);background:#f6f2e6;font-weight:400;}
+  .phase{border:1px solid var(--line);border-left:5px solid var(--green);border-radius:10px;background:#fff;padding:16px 18px;margin-bottom:14px;}
+  .phase .ph{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--green);}
+  .phase h4{margin:3px 0 2px;font-size:16px;}
+  .phase .when{font-size:12px;color:var(--muted);margin-bottom:10px;}
+  .phase .row{font-size:13px;line-height:1.5;margin:6px 0;}
+  .phase .tag{display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 7px;border-radius:20px;margin-right:6px;vertical-align:1px;}
+  .tdiy{background:#e6efdc;color:#4c6440;} .tcon{background:#f3ead1;color:#8a6a2d;}
+  .phase .cost{font-size:12.5px;color:var(--muted);border-top:1px dashed var(--line);margin-top:10px;padding-top:8px;}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;}
+  .pg{background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .pg img{width:100%;height:175px;object-fit:cover;display:block;background:#eee;cursor:zoom-in;}
+  .pg .t{padding:8px 9px 10px;}
+  .pg .cn{font-size:12.5px;font-weight:700;line-height:1.25;}
+  .pg .bn{font-size:10.5px;color:var(--muted);font-style:italic;margin:1px 0 4px;}
+  .pg .d{font-size:10.5px;color:var(--muted);line-height:1.35;}
+  .pg .r{display:inline-block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:20px;background:#eef1e6;color:#4c6440;margin-top:5px;}
+  dl.gloss{margin:0;font-size:13.5px;}
+  dl.gloss dt{font-weight:700;margin-top:12px;}
+  dl.gloss dd{margin:2px 0 0;color:var(--ink);line-height:1.5;}
+  dl.gloss dd i{color:var(--muted);}
+  #lb{position:fixed;inset:0;z-index:99;display:none;background:rgba(20,24,18,.93);cursor:zoom-out;padding:24px;box-sizing:border-box;align-items:center;justify-content:center;}
+  #lb.open{display:flex;}
+  #lb figure{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:100%;max-height:100%;}
+  #lb img{max-width:min(1400px,94vw);max-height:86vh;width:auto;height:auto;object-fit:contain;border:0;border-radius:10px;box-shadow:0 12px 48px rgba(0,0,0,.5);cursor:zoom-out;}
+  #lb figcaption{color:#efece2;font-size:13.5px;line-height:1.45;text-align:center;max-width:80ch;white-space:pre-line;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Six low-maintenance site plans</h1>
+<div class="sub">29950 S Highway 1, Gualala CA — 0.8-acre oceanfront bluff lot</div>
+<div class="conds">Designed for: constant NW wind + salt spray &middot; thin rocky soil &middot; heavy deer pressure &middot; no irrigation after establishment &middot; USDA 9b / Sunset zone 17. All plans keep the existing cypress windbreak along Highway 1.</div>
+
+<section>
+  <h2>Your property — before &amp; after</h2>
+  <p class="concept">AI edits of actual frames from the July 2026 walkthrough video. The house, cypress, headland and cove are real; only the landscaping is changed. <b>Site constraints respected:</b> tree lines + survey stakes are the property boundaries; the open ground by the carport stays drivable (vehicle turnaround); the patio-to-cliff strip is only ~20 ft and gets low groundcover only.</p>
+  <div class="photos" style="grid-template-columns:repeat(2,1fr)">
+    <figure><img style="height:320px" src="renders/driveway-before.jpg" alt="Driveway today"><figcaption>Driveway — today<em>bare compacted dirt, spilling out with no defined edge</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit1-driveway-after.jpg" alt="Driveway narrowed and surfaced"><figcaption>Driveway — narrowed &amp; surfaced<em>a defined DG drive with meadow reclaiming both sides — <b>not</b> a fully paved turnaround</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit2-meadow-before.jpg" alt="Turnaround before"><figcaption>Vehicle turnaround — today<em>bare dirt, still needs to park cars</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit2-turnaround-after.jpg" alt="Turnaround after"><figcaption>Turnaround — surfaced<em>full gravel for cars; plants only at house + tree-line edges</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit4-backyard-before.jpg" alt="Back yard before"><figcaption>Back yard — today<em>tall dry grass to the tree line</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit4-backyard-lawn.jpg" alt="Back yard as mowed native lawn"><figcaption>Back yard — mowed native lawn<em>turf-cut sedge/bentgrass lawn; flowers held in defined beds at the house + tree line (Plan 6)</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit3-cliff-before.jpg" alt="Cliff edge before"><figcaption>Cliff edge — today<em>dry grass + invasive iceplant</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit3-cliff-after.jpg" alt="Cliff edge after"><figcaption>Cliff edge — planted<em>low native mats only, ~20 ft strip (Plans 2/5)</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit5-sideyard-before.jpg" alt="Side yard before"><figcaption>Side yard — today<em>patchy grass by the shed</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit5-sideyard-after.jpg" alt="Side yard after"><figcaption>Side yard — planted<em>cobble foundation band, daisies + thrift, DG path (Plan 2)</em></figcaption></figure>
+  </div>
+  <h3 style="margin-top:26px">Alternative plant palettes — same yards</h3>
+  <p class="concept" style="margin-bottom:12px">The same before/afters replanted with two of the swap palettes, to compare the look. All still wind/salt-tolerant, deer-resistant, no-irrigation.</p>
+  <div class="photos" style="grid-template-columns:repeat(2,1fr)">
+    <figure><img style="height:320px" src="renders/edit4-backyard-after.jpg" alt="Back yard classic palette"><figcaption>Back yard — classic palette<em>yarrow, poppies, seaside daisy (Plan 1)</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/swap-warm-backyard.jpg" alt="Back yard warm palette"><figcaption>Back yard — warm pollinator swap<em>California fuchsia, sticky monkeyflower, coast aster</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/edit5-sideyard-after.jpg" alt="Side yard classic palette"><figcaption>Side yard — cushions palette<em>seaside daisy + sea thrift mounds</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/swap-silver-sideyard.jpg" alt="Side yard silver palette"><figcaption>Side yard — silver &amp; yellow swap<em>stonecrop, Dudleya, woolly sunflower, prostrate rosemary</em></figcaption></figure>
+  </div>
+  <h3 style="margin-top:26px">Flower-forward palettes on the back yard</h3>
+  <p class="concept" style="margin-bottom:12px">Same back-yard view, three of the most flower-heavy palettes (little to no grass) — compare against the warm pollinator one above.</p>
+  <div class="photos" style="grid-template-columns:repeat(3,1fr)">
+    <figure><img style="height:260px" src="renders/palette6-pink-purple.jpg" alt="Pink and purple palette"><figcaption>#6 Pink &amp; Purple<em>sea thrift, coyote mint, iris, seaside daisy</em></figcaption></figure>
+    <figure><img style="height:260px" src="renders/palette7-golden.jpg" alt="Golden meadow palette"><figcaption>#7 Golden Meadow<em>poppy, woolly sunflower, gumplant</em></figcaption></figure>
+    <figure><img style="height:260px" src="renders/palette11-herb.jpg" alt="Fragrant herb bank palette"><figcaption>#11 Fragrant Herb Bank<em>coyote mint, rosemary, sagebrush, daisy</em></figcaption></figure>
+  </div>
+</section>
+
+<!-- ================= FOUR SEASONS ================= -->
+<section>
+  <h2>The four seasons — do we have flowers year-round?</h2>
+  <p class="concept" style="margin-bottom:14px"><b>Short answer: yes, nearly — but not evenly.</b> Your fog-cooled, nearly frost-free coast is unusually generous. Spring is the peak; summer and fall stay colorful; <b>winter is the quiet one — fewer flowers, but never bare.</b> It reads as evergreen texture, silver foliage, red berries and a few winter bloomers. The trick is deliberately including the fall/winter performers, not just the spring stars. All four views below are the same back yard.</p>
+  <div class="photos" style="grid-template-columns:repeat(2,1fr)">
+    <figure><img style="height:320px" src="renders/season-spring.jpg" alt="Spring"><figcaption>Spring (Mar–May) — the peak<em>Ceanothus blue, Douglas iris, poppies, sea thrift, blue-eyed grass</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/season-summer.jpg" alt="Summer"><figcaption>Summer (Jun–Aug)<em>Seaside daisy, yarrow, coyote mint, monkeyflower, buckwheat; meadow goes golden</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/season-fall.jpg" alt="Fall"><figcaption>Fall (Sep–Nov)<em>California fuchsia scarlet, coast aster, gumplant; buckwheat ages to rust</em></figcaption></figure>
+    <figure><img style="height:320px" src="renders/season-winter.jpg" alt="Winter"><figcaption>Winter (Dec–Feb) — the quiet one<em>Evergreen mounds, silver foliage, rosemary blue, manzanita bells, toyon berries; lush from rain</em></figcaption></figure>
+  </div>
+  <div class="swaps" style="margin-top:16px"><span class="sh">Who carries each season</span>
+    <b>Spring:</b> ceanothus, Douglas iris, California poppy, sea thrift, blue-eyed grass, beach strawberry. &nbsp;<b>Summer:</b> seaside daisy, yarrow, coyote mint, sticky monkeyflower, coast buckwheat, woolly sunflower. &nbsp;<b>Fall:</b> California fuchsia, coast aster, gumplant. &nbsp;<b>Winter:</b> prostrate rosemary (blue), manzanita/kinnikinnick (pink bells), coast silk tassel (catkins), toyon (red berries) — plus every evergreen mound and silver leaf in the garden.<br><br>
+    <b>If you want the fullest year:</b> make sure your plan includes at least <b>California fuchsia + coast aster</b> (for fall) and <b>rosemary + manzanita + toyon</b> (for winter). Skip those and the garden really does go flat from October to March.</div>
+</section>
+
+<!-- ================= PLANT GUIDE ================= -->
+<section>
+  <h2>Plant guide — what each plant actually looks like</h2>
+  <p class="carelegend">Every plant named anywhere in this document, with a photo. All are wind- and salt-tolerant, deer-resistant, and need no irrigation once established. Grouped by the job they do in the garden.</p>
+
+  <h3>Flowers &amp; low perennials <span style="text-transform:none;letter-spacing:0;font-weight:400">— the color</span></h3>
+  <div class="pgrid" id="pg1"></div>
+
+  <h3 style="margin-top:24px">Groundcovers &amp; mats <span style="text-transform:none;letter-spacing:0;font-weight:400">— the carpet, erosion control</span></h3>
+  <div class="pgrid" id="pg2"></div>
+
+  <h3 style="margin-top:24px">Succulents <span style="text-transform:none;letter-spacing:0;font-weight:400">— for rock pockets &amp; sharp drainage</span></h3>
+  <div class="pgrid" id="pg3"></div>
+
+  <h3 style="margin-top:24px">Grasses &amp; grass-like <span style="text-transform:none;letter-spacing:0;font-weight:400">— the meadow base &amp; texture</span></h3>
+  <div class="pgrid" id="pg4"></div>
+
+  <h3 style="margin-top:24px">Shrubs <span style="text-transform:none;letter-spacing:0;font-weight:400">— windbreak, screening, structure</span></h3>
+  <div class="pgrid" id="pg5"></div>
+</section>
+
+<!-- ================= PALETTE LIBRARY ================= -->
+<section>
+  <h2>Palette library — 12 options</h2>
+  <p class="carelegend">Every palette below is wind- and salt-tolerant, deer-resistant, and needs <b>no irrigation once established</b> (hand-water the first summer only). Mix and match freely — any of these works in the meadow, the yards around the house, or the bluff strip.<br>
+  <b><span class="care care-vlow">Very low</span></b> = plant it and largely leave it; one annual cut or mow. &nbsp; <b><span class="care care-low">Low</span></b> = the above plus occasional deadheading/shearing, or dividing every few years.</p>
+  <div class="plib">
+
+    <div class="pcard">
+      <h4>1 · Coastal Meadow</h4>
+      <div class="vibe">Wild golden prairie that ripples in the wind.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>Red fescue 'Molate' <span>Festuca rubra</span></li>
+        <li>Dune sedge <span>Carex pansa</span></li>
+        <li>California poppy <span>Eschscholzia californica</span></li>
+        <li>Yarrow <span>Achillea millefolium</span></li>
+        <li>Blue-eyed grass <span>Sisyrinchium bellum</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>2 · Warm Pollinator</h4>
+      <div class="vibe">Hot oranges and purples; hummingbird &amp; bee magnet.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>California fuchsia <span>Epilobium canum</span></li>
+        <li>Sticky monkeyflower <span>Diplacus aurantiacus</span></li>
+        <li>Coast aster <span>Symphyotrichum chilense</span></li>
+        <li>Seaside daisy <span>Erigeron glaucus</span></li>
+        <li>Yarrow <span>Achillea millefolium</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>3 · Silver &amp; Yellow</h4>
+      <div class="vibe">Architectural succulents in a dry, sculptural bed.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>Bluff lettuce <span>Dudleya farinosa</span></li>
+        <li>Pacific stonecrop <span>Sedum spathulifolium</span></li>
+        <li>Seaside woolly sunflower <span>Eriophyllum staechadifolium</span></li>
+        <li>Prostrate rosemary <span>Salvia rosmarinus</span></li>
+        <li>Coast buckwheat <span>Eriogonum latifolium</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>4 · Blue &amp; Silver</h4>
+      <div class="vibe">Cool Mediterranean-coastal calm.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>Pt. Reyes ceanothus <span>Ceanothus gloriosus</span></li>
+        <li>Prostrate rosemary <span>Salvia rosmarinus</span></li>
+        <li>Bluff lettuce <span>Dudleya farinosa</span></li>
+        <li>'Wayne Roderick' daisy <span>Erigeron 'W.R.'</span></li>
+        <li>Idaho fescue <span>Festuca idahoensis</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>5 · White Moonlight</h4>
+      <div class="vibe">Quiet white-and-silver, glows at dusk in the fog.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>White yarrow <span>Achillea millefolium</span></li>
+        <li>Seaside daisy (white form) <span>Erigeron glaucus</span></li>
+        <li>Pacific stonecrop <span>Sedum spathulifolium</span></li>
+        <li>Coast buckwheat <span>Eriogonum latifolium</span></li>
+        <li>Deer grass <span>Muhlenbergia rigens</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>6 · Pink &amp; Purple</h4>
+      <div class="vibe">Soft, romantic cushions and iris.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>Sea thrift <span>Armeria maritima</span></li>
+        <li>Coyote mint <span>Monardella villosa</span></li>
+        <li>Douglas iris <span>Iris douglasiana</span></li>
+        <li>Seaside daisy <span>Erigeron glaucus</span></li>
+        <li>Coast buckwheat <span>Eriogonum latifolium</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>7 · Golden Meadow</h4>
+      <div class="vibe">Warm dry-grass palette, sun all summer.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>California poppy <span>Eschscholzia californica</span></li>
+        <li>Seaside woolly sunflower <span>Eriophyllum staechadifolium</span></li>
+        <li>Deer grass <span>Muhlenbergia rigens</span></li>
+        <li>Coast buckwheat <span>Eriogonum latifolium</span></li>
+        <li>Gumplant <span>Grindelia stricta</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>8 · Groundcover Carpet</h4>
+      <div class="vibe">Low evergreen mat; erosion control, no mowing.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>Beach strawberry <span>Fragaria chiloensis</span></li>
+        <li>Pt. Reyes ceanothus <span>Ceanothus gloriosus</span></li>
+        <li>Kinnikinnick <span>Arctostaphylos uva-ursi</span></li>
+        <li>Coyote mint <span>Monardella villosa</span></li>
+        <li>Dwarf coyote brush <span>Baccharis 'Pigeon Point'</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>9 · Grass-Forward</h4>
+      <div class="vibe">Naturalistic movement, sparse flower accents.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>Red fescue 'Molate' <span>Festuca rubra</span></li>
+        <li>Deer grass <span>Muhlenbergia rigens</span></li>
+        <li>Pacific reed grass <span>Calamagrostis nutkaensis</span></li>
+        <li>Idaho fescue <span>Festuca idahoensis</span></li>
+        <li>Blue-eyed grass <span>Sisyrinchium bellum</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>10 · Succulent Rock Garden</h4>
+      <div class="vibe">Boulders + gravel + succulents; nearly no upkeep.</div>
+      <span class="care care-vlow">Very low</span>
+      <ul>
+        <li>Bluff lettuce <span>Dudleya farinosa</span></li>
+        <li>Pacific stonecrop <span>Sedum spathulifolium</span></li>
+        <li>Sea thrift <span>Armeria maritima</span></li>
+        <li>Seaside daisy <span>Erigeron glaucus</span></li>
+        <li>Coast buckwheat <span>Eriogonum latifolium</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>11 · Fragrant Herb Bank</h4>
+      <div class="vibe">Aromatic when brushed; grey-green textures.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>Coyote mint <span>Monardella villosa</span></li>
+        <li>Yerba buena <span>Clinopodium douglasii</span></li>
+        <li>Prostrate rosemary <span>Salvia rosmarinus</span></li>
+        <li>California sagebrush <span>Artemisia californica</span></li>
+        <li>Seaside daisy <span>Erigeron glaucus</span></li>
+      </ul>
+    </div>
+
+    <div class="pcard">
+      <h4>12 · Shady Tree-Line Edge</h4>
+      <div class="vibe">For the cool north/cypress side in part shade.</div>
+      <span class="care care-low">Low</span>
+      <ul>
+        <li>Coast huckleberry <span>Vaccinium ovatum</span></li>
+        <li>Island coral bells <span>Heuchera maxima</span></li>
+        <li>Douglas iris <span>Iris douglasiana</span></li>
+        <li>California fescue <span>Festuca californica</span></li>
+        <li>Yerba buena <span>Clinopodium douglasii</span></li>
+      </ul>
+    </div>
+
+  </div>
+  <div class="buy" style="margin-top:18px">Palettes 2 (warm) and 3 (silver &amp; yellow) are shown rendered on your house above. I can render any of the others on your actual yards too — just name the numbers.</div>
+</section>
+
+<!-- ================= PLAN 1 ================= -->
+<section>
+  <h2><span class="planno">1</span>Coastal Meadow</h2>
+  <div class="badges"><span class="badge">Lowest cost</span><span class="badge">Mow 1–2x/yr</span><span class="badge">Seed + plugs</span></div>
+  <p class="concept">The whole open bluff becomes a native grass meadow with wildflower drifts, and the only "maintenance" is an annual mow. Mown paths wander to the cliff for that Sea Ranch look. Best if you want the lot to read as wild coastal prairie.</p>
+  <div class="plan-svg" data-plan="p1"></div>
+  <h3>Core plants</h3>
+  <ul class="plist">
+    <li><b>Red fescue 'Molate'</b> — <span>Festuca rubra</span> · the meadow base, from seed</li>
+    <li><b>Dune sedge</b> — <span>Carex pansa</span> · walkable green mat, from plugs</li>
+    <li><b>California poppy</b> — <span>Eschscholzia californica</span> · orange, self-sows from seed</li>
+    <li><b>Yarrow</b> — <span>Achillea millefolium</span> · white, deer-proof</li>
+    <li><b>Blue-eyed grass</b> — <span>Sisyrinchium bellum</span> · spring color</li>
+  </ul>
+  <div class="swaps"><span class="sh">Swap options (same criteria)</span>
+    <b>Finer base:</b> Idaho fescue (<i>Festuca idahoensis</i>) for a bluer, finer texture. <b>Longer bloom:</b> add Santa Barbara daisy (<i>Erigeron karvinskianus</i>) and seaside daisy for near year-round flowers. <b>Late season:</b> coast aster or coyote mint for lavender in fall. <b>Hummingbirds:</b> California fuchsia (<i>Epilobium canum</i>) for orange late-summer color.</div>
+  <div class="buy"><b>Get it:</b> Molate fescue seed + Carex plugs special-ordered through Gualala Nursery &amp; Trading Co; wildflower seed and soil amendment at Gualala Building Supply.</div>
+</section>
+
+<!-- ================= PLAN 2 ================= -->
+<section>
+  <h2><span class="planno">2</span>Bluff Rock Garden</h2>
+  <div class="badges"><span class="badge">Most rock</span><span class="badge">Near-zero upkeep</span><span class="badge">Fire-wise</span></div>
+  <p class="concept">Gravel and cobble replace most of the grass: decomposed-granite ground plane, drifts of beach cobble, boulder groups echoing your offshore sea stacks, and planting pockets of bluff succulents and cushion perennials. Nothing to mow, nothing to water.</p>
+  <div class="plan-svg" data-plan="p2"></div>
+  <h3>Core plants &amp; materials</h3>
+  <ul class="plist">
+    <li><b>Bluff lettuce</b> — <span>Dudleya farinosa</span> · powdery succulent, grows wild on your cliffs</li>
+    <li><b>Pacific stonecrop</b> — <span>Sedum spathulifolium</span> · low silver-green mat</li>
+    <li><b>Sea thrift</b> — <span>Armeria maritima</span> · pink cushions</li>
+    <li><b>Seaside daisy</b> — <span>Erigeron glaucus</span> · lavender, long bloom</li>
+    <li><b>Coast buckwheat</b> — <span>Eriogonum latifolium</span> · pollinator magnet</li>
+    <li><b>Decomposed granite</b> — 3/8"-minus · path &amp; ground plane · <b>river/beach cobble</b> 3–8" drifts · <b>quarry boulders</b> set 1/3-buried in odd-number groups</li>
+  </ul>
+  <div class="swaps"><span class="sh">Swap options (same criteria)</span>
+    <b>Longest bloom:</b> 'Wayne Roderick' daisy flowers most of the year on the coast. <b>Yellow accent:</b> seaside woolly sunflower (<i>Eriophyllum staechadifolium</i>), very salt-tough. <b>Winter color:</b> prostrate rosemary loves the wind and blooms when natives rest. <b>Fragrance:</b> coyote mint (<i>Monardella villosa</i>).</div>
+  <div class="buy"><b>Get it:</b> DG, cobble and drain rock delivered in bulk by Gravel Monkey or Hello Gravel; boulders special-ordered through Gualala Building Supply; succulents/perennials at Gualala Nursery.</div>
+</section>
+
+<!-- ================= PLAN 3 ================= -->
+<section>
+  <h2><span class="planno">3</span>Dry Creek Canyon</h2>
+  <div class="badges"><span class="badge">Solves winter runoff</span><span class="badge">Med. cost</span><span class="badge">Rock + plants</span></div>
+  <p class="concept">The natural drainage line from the driveway to the cove becomes the centerpiece: a broad cobble creek bed with boulder bends and a timber crossing, banks planted with rushes, iris and monkeyflower. The rest stays simple mowed meadow.</p>
+  <div class="plan-svg" data-plan="p3"></div>
+  <div class="swaps" style="margin:0 0 14px"><b>Scale note:</b> at your true lot size this is a short 30–60 ft cobble swale along the existing runoff line near the NW corner — not a full creek. Most of the stone can come from the cobble pile already on site.</div>
+  <h3>Core plants &amp; materials</h3>
+  <ul class="plist">
+    <li><b>California gray rush</b> — <span>Juncus patens</span> · vertical accent on the banks</li>
+    <li><b>Douglas iris</b> — <span>Iris douglasiana</span> · purple, grows wild near Salt Point</li>
+    <li><b>Sticky monkeyflower</b> — <span>Diplacus aurantiacus</span> · orange, long bloom</li>
+    <li><b>Pacific reed grass</b> — <span>Calamagrostis nutkaensis</span> · soft clumps</li>
+    <li><b>Drain rock</b> 3/4" base · <b>river cobble</b> top dressing · <b>boulders</b> at the bends</li>
+  </ul>
+  <div class="swaps"><span class="sh">Swap options (same criteria)</span>
+    <b>More flower color:</b> Pacific Coast Hybrid iris come in many shades and are just as tough as Douglas iris. <b>Drier banks:</b> coast aster or seaside daisy. <b>Grass alternative:</b> deer grass (<i>Muhlenbergia rigens</i>) or California fescue for a tidier tussock.</div>
+  <div class="buy"><b>Get it:</b> drain rock + cobble in bulk from Gravel Monkey / Hello Gravel; filter fabric and timbers at Gualala Building Supply; bank plants at Gualala Nursery.</div>
+</section>
+
+<!-- ================= PLAN 4 ================= -->
+<section>
+  <h2><span class="planno">4</span>Sheltered Garden Rooms</h2>
+  <div class="badges"><span class="badge">Uses fill dirt</span><span class="badge">Most livable</span><span class="badge">Berms + shrubs</span></div>
+  <p class="concept">Imported fill builds two low berms (18–36") on the windward side, planted with tough evergreen natives. Behind them: a calm gravel-floor sitting room with boulder seats and a sunning lawn circle. This is the plan if you actually want to <i>sit outside</i> on a windy bluff.</p>
+  <div class="plan-svg" data-plan="p4"></div>
+  <div class="swaps" style="margin:0 0 14px"><b>Scale note:</b> at your true lot size this is one small sitting circle in the side or back yard (inland of the house), sheltered by a short berm — not on the 20-ft ocean strip.</div>
+  <h3>Core plants &amp; materials</h3>
+  <ul class="plist">
+    <li><b>Pt. Reyes ceanothus</b> — <span>Ceanothus gloriosus</span> · blue-flowering mat on the berm faces</li>
+    <li><b>Kinnikinnick manzanita</b> — <span>Arctostaphylos uva-ursi</span> · glossy evergreen groundcover</li>
+    <li><b>Dwarf coyote brush</b> — <span>Baccharis pilularis 'Pigeon Point'</span> · tough green mounds</li>
+    <li><b>Coast silk tassel</b> — <span>Garrya elliptica</span> · windbreak infill, winter catkins</li>
+    <li><b>Toyon</b> — <span>Heteromeles arbutifolia</span> · evergreen screen + red berries</li>
+    <li><b>Pea gravel</b> — sitting-room floor</li>
+  </ul>
+  <div class="swaps"><span class="sh">Swap options (same criteria)</span>
+    <b>Windbreak infill:</b> Pacific wax myrtle (<i>Morella californica</i>) or coffeeberry 'Eve Case' (<i>Frangula californica</i>) — fast, dense, bird-friendly. <b>Color:</b> bush monkeyflower for orange bloom. <b>Part shade near trees:</b> California huckleberry (<i>Vaccinium ovatum</i>). <b>Lowest mounds:</b> coyote brush 'Twin Peaks'.</div>
+  <div class="buy"><b>Get it:</b> fill dirt + topsoil delivered (Gravel Monkey / Hello Gravel, or ask Gualala Building Supply for local dirt); shrubs in 1-gal at Gualala Nursery. <b>Note:</b> grading/fill near the bluff edge can trigger a Mendocino County coastal permit — keep berms on the inland half or check first.</div>
+</section>
+
+<!-- ================= PLAN 5 ================= -->
+<section>
+  <h2><span class="planno">5</span>Overlook Trail &amp; Groundcover Carpet</h2>
+  <div class="badges"><span class="badge">Best views</span><span class="badge">Erosion control</span><span class="badge">DG + mats</span></div>
+  <p class="concept">A decomposed-granite loop trail links two bench overlooks — one above the cove, one at the south point. Everything between is carpeted in knee-high-or-lower evergreen mats that knit the bluff together and never need pruning. A cobble fire-wise band wraps the house.</p>
+  <div class="plan-svg" data-plan="p5"></div>
+  <div class="swaps" style="margin:0 0 14px"><b>Scale note:</b> the ocean-side strip is only ~20 ft (patio to cliff) — groundcover only there. The short DG path and bench live on the inland and side yards instead.</div>
+  <h3>Core plants &amp; materials</h3>
+  <ul class="plist">
+    <li><b>Beach strawberry</b> — <span>Fragaria chiloensis</span> · glossy fast carpet</li>
+    <li><b>Pt. Reyes ceanothus</b> — <span>Ceanothus gloriosus</span> · blue-flowering mat</li>
+    <li><b>Kinnikinnick</b> — <span>Arctostaphylos uva-ursi</span> · evergreen groundcover</li>
+    <li><b>Deer grass</b> — <span>Muhlenbergia rigens</span> · fountain-shaped trail accents</li>
+    <li><b>Decomposed granite</b> 4' compacted trail · <b>cobble</b> fire-wise band at the house</li>
+  </ul>
+  <div class="swaps"><span class="sh">Swap options (same criteria)</span>
+    <b>Fragrant mats:</b> yerba buena (<i>Clinopodium douglasii</i>) or coyote mint instead of some strawberry. <b>Flower:</b> weave in coast aster and seaside daisy for color through the carpet. <b>Tighter accents:</b> Idaho fescue tufts where deer grass would be too big.</div>
+  <div class="buy"><b>Get it:</b> DG + cobble bulk-delivered (Gravel Monkey / Hello Gravel); flats of groundcover at Gualala Nursery (or Mostly Natives in Tomales for the best selection); benches/timber at Gualala Building Supply.</div>
+</section>
+
+<!-- ================= PLAN 6 ================= -->
+<section>
+  <h2><span class="planno">6</span>Mowed Native Lawn</h2>
+  <div class="badges"><span class="badge">Real lawn look</span><span class="badge">Mow every 2 weeks</span><span class="badge">Plugs or native sod</span></div>
+  <p class="concept">Yes — a few California natives genuinely mow into a lawn. Stretches of the yard become tight green turf you cut a couple of times a month, and all the flowers move to <b>borders along the edges</b> — tree line, house foundation, driveway. <b>Dune sedge</b> (<i>Carex pansa</i>) is the classic coastal choice: mowed every ~2 weeks at 2½–3½" it reads as a true lawn, and it's native to exactly this kind of sandy, salt-blasted coast. <b>Native bentgrass</b> (<i>Agrostis pallens</i>) does the same and is sold as native sod for an instant lawn. Both take foot traffic, need no fertilizer, and use a fraction of a conventional lawn's water — a deep soak every week or two in summer keeps them green on the bluff (skip it and they go summer-blond like the meadow, then green up with the rains). The 20-ft cliff strip stays unmowed groundcover mats — never run a mower at the bluff edge.</p>
+  <div class="plan-svg" data-plan="p6"></div>
+  <h3>Core plants</h3>
+  <ul class="plist">
+    <li><b>Dune sedge</b> — <span>Carex pansa</span> · the lawn itself; plugs 6–8" apart, knits solid in 1–2 seasons</li>
+    <li><b>Native bentgrass</b> — <span>Agrostis pallens</span> · the lawn from native sod — instant, mows beautifully</li>
+    <li><b>Clustered field sedge</b> — <span>Carex praegracilis</span> · toughest-traffic sedge lawn alternative</li>
+    <li><b>Seaside daisy + sea thrift</b> — <span>Erigeron glaucus · Armeria maritima</span> · front-of-border cushions</li>
+    <li><b>Yarrow</b> — <span>Achillea millefolium</span> · border filler; also tolerates mowing blended INTO the lawn</li>
+    <li><b>California poppy + coyote mint</b> — <span>Eschscholzia · Monardella</span> · border color spring–fall</li>
+  </ul>
+  <div class="swaps"><span class="sh">Lawn options, honestly compared</span>
+    <b>Native sod</b> (Agrostis pallens, or red-fescue "mow free" blends) — finished lawn the day it's laid; the priciest option; order from a native-sod grower for delivery after site prep. &nbsp;<b>Plugs</b> (Carex pansa/praegracilis) — a fraction of the cost; looks patchy the first season, solid by the second. &nbsp;<b>Seed</b> ('Molate' red fescue) — cheapest; shaggier meadow-lawn that prefers 3–4" height and monthly cuts, not a tight turf look. &nbsp;<b>Mowing reality:</b> rotary mower at its highest setting, every 2 weeks in the growing season; never scalp below ~2½".</div>
+  <div class="buy"><b>Get it:</b> Carex plugs + border flowers in 4" pots special-ordered through Gualala Nursery &amp; Trading Co; native sod ships refrigerated from Central Valley growers (e.g., Delta Bluegrass) — schedule delivery for the week after the ground is cleared and raked.</div>
+</section>
+
+<!-- ================= SITE PREP & SOIL ================= -->
+<section>
+  <h2>Site prep, soil, permits &amp; planting</h2>
+  <p class="concept" style="margin-bottom:14px"><b>Bottom line: plant into your existing soil, don't add topsoil or compost, clear the weed seed bank before planting — and no permit is needed to plant, but moving dirt near the bluff probably needs one.</b></p>
+
+  <h3>Do we need to add soil?</h3>
+  <p class="concept" style="margin:0 0 10px">Almost certainly not. California coastal natives evolved for exactly what you have — thin, sandy/rocky, lean bluff soil with good drainage. Amending with compost or fertilizer makes results <i>worse</i> (floppy growth, rot, weed flush). Plant the meadow and all flower palettes straight into the native ground, no fertilizer.</p>
+  <p class="concept" style="margin:0 0 10px"><b>Quick soil check:</b> dig a hole ~1 ft deep, fill with water — if it drains within a few hours, you're good (on a windy sandy bluff it almost always does).</p>
+  <div class="swaps"><span class="sh">Where you DO bring in material</span>
+    <b>Berms / raised mounds</b> (Plan 4, or to lift succulents) — import fill + a little topsoil to build the shape. &nbsp;<b>Succulents</b> (Dudleya, stonecrop) — mix coarse gravel/sand into just the planting pocket for sharp drainage. &nbsp;<b>Gravel or DG "mulch"</b> on beds — not to feed plants, but to suppress weeds and keep roots cool (bark blows away in the wind; use rock). &nbsp;<b>Driveway</b> — road base + DG, not soil.</div>
+
+  <h3 style="margin-top:22px">Do I need a permit?</h3>
+  <p class="concept" style="margin:0 0 10px">Your lot is in the <b>Mendocino County Coastal Zone</b>, and the Highway 1 corridor is a designated <b>Highly Scenic Area</b> — so the rules are stricter than inland. In the coastal code, "development" is defined broadly and explicitly includes <b>grading</b> and <b>removal of major vegetation</b>. For this project:</p>
+  <table class="cost">
+    <tr><th>Activity</th><th>Permit?</th><th>Notes</th></tr>
+    <tr><td class="opt">Planting &amp; seeding</td><td class="diy">No</td><td>Putting plants in the ground, sowing a native meadow, gravel mulch — ordinary gardening, not "development."</td></tr>
+    <tr><td class="opt">Removing the invasive iceplant</td><td class="diy">No</td><td>This is restoration, not major vegetation removal. Just don't destabilize the bluff face doing it.</td></tr>
+    <tr><td class="opt">Cutting the cypress</td><td class="pro">Ask first</td><td><b>Don't.</b> Mature trees likely count as "major vegetation" — removal in the coastal zone typically needs review. The County has a <i>Major Vegetation Removal Questionnaire</i> for this.</td></tr>
+    <tr><td class="opt">Berms / imported fill / any earthmoving <span class="sub">(Phase 4)</span></td><td class="pro">Probably yes</td><td>Grading in the coastal zone generally requires a <b>Coastal Development Permit</b>, plus possibly a county grading permit depending on volume. Assume yes near the bluff edge.</td></tr>
+    <tr><td class="opt">Driveway resurfacing</td><td class="pro">Gray area</td><td>Re-surfacing the existing footprint reads as repair/maintenance (usually exempt); regrading or widening can tip into "development." Worth one phone call.</td></tr>
+  </table>
+  <div class="buy" style="margin-top:12px"><b>What to actually do:</b> call <b>Mendocino County Planning &amp; Building Services</b>, describe the project, and ask whether you need a CDP or qualify under a <b>Categorical Exclusion</b>. They handle this daily and will usually confirm the planting is fine and only the grading needs review. Confirm before you move any dirt — this document is not a permitting authority.</div>
+
+  <h3 style="margin-top:22px">How to actually plant them</h3>
+  <p class="concept" style="margin:0 0 10px">Plant in fall, after the first real rains (Oct–Nov). For each plant:</p>
+  <ol style="font-size:13.5px;line-height:1.6;margin:0 0 8px;padding-left:20px">
+    <li>Dig a hole <b>twice as wide as the pot, but no deeper</b>. The crown (where stem meets roots) must sit <b>at or slightly above</b> grade. <b>Burying the crown is the #1 killer of California natives.</b></li>
+    <li><b>Don't amend the hole.</b> Backfill with the same native soil you dug out — no compost, no fertilizer.</li>
+    <li>Set a <b>gopher basket</b> in the hole first and plant inside it.</li>
+    <li>Gently loosen any roots circling the root ball, set the plant in, backfill, firm the soil by hand.</li>
+    <li>Water deeply once at planting to settle soil around the roots — even if rain is coming.</li>
+    <li>Top with gravel/DG mulch, but <b>keep mulch off the stem</b>.</li>
+    <li>Then deep, infrequent water (every 2–3 weeks) through the <b>first summer only</b>. After that, stop — these plants resent summer water once established.</li>
+  </ol>
+  <div class="swaps"><span class="sh">Spacing</span>Give plants their mature size: groundcovers ~2–3 ft apart, perennials ~1.5–2 ft. It will look sparse the first year — that's correct.</div>
+
+  <h3 style="margin-top:22px">Can I use seed to save money?</h3>
+  <p class="concept" style="margin:0 0 10px">Yes — for some things, and the savings are large: seeding a meadow runs roughly <b>$0.10–0.30/sq ft</b> versus <b>$8–15/sq ft</b> for installed planting. But seed only works for certain plants.</p>
+  <table class="cost">
+    <tr><th>Method</th><th>Use it for</th><th>Why</th></tr>
+    <tr><td class="opt diy">Seed <span class="sub">cheapest</span></td><td>Molate red fescue meadow, California poppy, yarrow, lupine, gumplant, tidy tips, clarkia</td><td>Germinates readily; ideal for broad areas and wildflower drifts.</td></tr>
+    <tr><td class="opt">Plugs <span class="sub">cheap, small</span></td><td>Dune sedge, groundcover mats (ceanothus, kinnikinnick, beach strawberry), cliff-edge erosion strip</td><td>Establish fast and hold a slope; sedge seed is unreliable.</td></tr>
+    <tr><td class="opt pro">1-gallon <span class="sub">priciest</span></td><td>Shrubs (toyon, coffeeberry, silk tassel, wax myrtle) and key perennials in the beds by the house</td><td>Woody plants are slow/erratic from seed — many need scarification or smoke treatment. Dudleya from seed takes years.</td></tr>
+  </table>
+  <div class="buy" style="margin-top:12px"><b>The money-smart hybrid:</b> <b>seed</b> the broad meadow and wildflower drifts &middot; <b>plugs</b> for the groundcover mats and the cliff-edge strip &middot; <b>1-gal</b> only for shrubs and the beds you see from the house. <b>Two catches with seed:</b> you must run the grow-and-kill weed cycle first or weeds will outrun your natives, and seed takes <b>2–3 years to look full</b>. That's why the erosion-control strip gets plugs, not seed.</div>
+
+  <h3 style="margin-top:22px">How to clear the existing plants</h3>
+  <p class="concept" style="margin:0 0 10px">The key is killing the <b>weed seed bank</b>, not just pulling tops — the dry annual grass re-sprouts from seed otherwise. Chemical-free sequence, done late summer before fall planting:</p>
+  <ol style="font-size:13.5px;line-height:1.6;margin:0 0 8px;padding-left:20px">
+    <li><b>Mow it low</b> first.</li>
+    <li><b>Sod-cut or scrape</b> the top 1–2" (rent a sod cutter) to strip the root mat and seed-laden surface — fast for turning grass into a bed. <i>Or</i> for beds, <b>sheet-mulch</b>: cardboard + several inches of gravel/mulch to smother grass over a couple months.</li>
+    <li>For a meadow, run the <b>"grow-and-kill" cycle</b>: water to sprout weed seeds, then hoe or flame the seedlings; repeat 2–3 times. Each pass empties the seed bank so natives aren't swamped. Then sow native seed with the first rains.</li>
+    <li><b>Don't rototill deeply</b> — it drags up more buried weed seed.</li>
+    <li><b>Iceplant at the cliff</b> pulls up as a mat — remove every fragment (it re-roots from pieces) and bag it; don't compost.</li>
+    <li><b>Keep the cypress and their needle litter</b> — free mulch, and the roots hold the bluff.</li>
+  </ol>
+
+  <h3 style="margin-top:22px">Know your target — what iceplant looks like</h3>
+  <p class="concept" style="margin:0 0 10px">Highway iceplant (<i>Carpobrotus edulis</i>) — the invasive succulent to remove at the cliff edge. Fleshy three-sided "fingers" (often red-tipped in sun) in dense mats that smother everything; big silky flowers from pale yellow to magenta.</p>
+  <div class="photos" style="grid-template-columns:repeat(3,1fr)">
+    <figure><img style="height:260px" src="plants/carpobrotus-edulis-mat.jpg" alt="Iceplant mat smothering the ground"><figcaption>The mat<em>dense carpet that smothers everything beneath it</em></figcaption></figure>
+    <figure><img style="height:260px" src="plants/carpobrotus-edulis-leaves.jpg" alt="Iceplant succulent leaves close-up"><figcaption>The leaves<em>fleshy 3-sided fingers, red-tipped in sun</em></figcaption></figure>
+    <figure><img style="height:260px" src="plants/carpobrotus-edulis-flower.jpg" alt="Iceplant flower close-up"><figcaption>The flower<em>silky many-petaled, pale yellow to magenta</em></figcaption></figure>
+  </div>
+  <p class="concept" style="margin:10px 0 0;font-size:12.5px">Don't confuse it with the native <b>bluff lettuce (Dudleya)</b> in the plant guide below — Dudleya grows as separate powdery blue-grey rosettes, not a running mat, and stays.</p>
+
+  <div class="buy"><b>Timing:</b> clear in late summer, plant Oct–Nov so winter rain establishes everything for free. Use <b>gopher baskets</b> around new plants regardless of clearing.</div>
+</section>
+
+<!-- ================= PHASED PLAN ================= -->
+<section>
+  <h2>Phased plan — DIY-first, over several years</h2>
+  <p class="carelegend">Sequenced so each year is a manageable chunk, early phases are cheap and high-impact, and you only <b class="pro">contract</b> the few jobs that really need machinery or a permit. Everything else is <b class="diy">DIY</b>. Each phase is timed for late-summer prep + fall planting so winter rain does the watering.</p>
+
+  <div class="phase">
+    <div class="ph">Phase 0 · This fall — prep &amp; the big cheap win</div>
+    <h4>Clear weeds, kill the iceplant, seed the meadow</h4>
+    <div class="when">Late summer clearing → sow with first rains (Oct–Nov)</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Remove the invasive iceplant at the cliff edge (roll up the mat, bag every fragment). Mow the open lot low; rent a sod cutter or run the "grow-and-kill" weed cycle on the areas you'll plant.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Broadcast-seed the open meadow (Molate fescue + wildflowers) into the cleared ground. Biggest visual change for the least money.</div>
+    <div class="row"><span class="tag tcon">Contract / rent</span>Sod-cutter and (optional) a day of help hauling iceplant — otherwise all DIY.</div>
+    <div class="cost"><b>Phase total: $1,500–4,000</b> &nbsp;·&nbsp; mostly seed, plugs, and a tool rental.</div>
+  </div>
+
+  <div class="phase">
+    <div class="ph">Phase 1 · Year 1 — the functional fix + first flowers</div>
+    <h4>Surface the driveway; plant the yards you see &amp; use</h4>
+    <div class="when">Driveway any dry season; beds planted the following fall</div>
+    <div class="row"><span class="tag tcon">Contract</span>Driveway base: <b>first decide the driveway's actual footprint</b> — narrow it to a defined drive plus a modest parking apron at the carport, rather than surfacing the whole spreading dirt area. Then grade + lay/compact Class II road base over just that footprint (needs a skid steer + roller — the one job worth hiring). Less area = less cost.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Spread and compact the 3/8"-minus DG top coat and set a clean edge (steel, timber, or a cobble band) so the drive holds its shape.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Let the meadow/wildflowers reclaim the leftover dirt on both sides of the new drive — that's what turns it from a parking lot into a driveway through a garden.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Plant the back yard + one side yard beds from 1-gal/plugs (pick a flower palette), with gopher baskets and a gravel mulch band along the house.</div>
+    <div class="cost"><b>Phase total: $4,000–9,000</b> &nbsp;·&nbsp; driveway base is the main contracted line item (cheaper now that the drive is narrowed).</div>
+  </div>
+
+  <div class="phase">
+    <div class="ph">Phase 2 · Year 2 — hold the edge, spread the color</div>
+    <h4>Cliff-edge groundcover mats + expand wildflowers</h4>
+    <div class="when">Plant in fall</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Plant low native mats (ceanothus, manzanita, beach strawberry) along the ~20 ft bluff strip for erosion control — all hand-planted, no machinery.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Overseed / plug more wildflower drifts into the meadow and fill gaps in the Year-1 beds.</div>
+    <div class="cost"><b>Phase total: $2,000–4,000</b> &nbsp;·&nbsp; all DIY planting.</div>
+  </div>
+
+  <div class="phase">
+    <div class="ph">Phase 3 · Year 3 — rock &amp; structure</div>
+    <h4>Dry-creek swale, boulder groups, fire-wise cobble band</h4>
+    <div class="when">Dry season for rock work</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Build the short cobble swale along the runoff line using the cobble pile already on site; lay a cobble fire-wise band around the house.</div>
+    <div class="row"><span class="tag tcon">Contract / rent</span>Setting the large boulders (needs a machine) — a half-day with a mini-excavator or a landscaper.</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Plant swale banks with rush, iris, and monkeyflower.</div>
+    <div class="cost"><b>Phase total: $3,000–7,000</b> &nbsp;·&nbsp; boulder-setting is the only contracted bit.</div>
+  </div>
+
+  <div class="phase">
+    <div class="ph">Phase 4 · Year 4+ — the living spaces &amp; finishing touches</div>
+    <h4>Sheltered sitting area, herb bank, overlook bench</h4>
+    <div class="when">Spread over one or more seasons as budget allows</div>
+    <div class="row"><span class="tag tcon">Contract</span>Import fill for the low berms and check whether any grading falls in the coastal-bluff setback (may need a Mendocino County permit).</div>
+    <div class="row"><span class="tag tdiy">DIY</span>Shape the berms, spread the pea-gravel sitting floor, plant the sheltering shrubs and a fragrant herb bank, set a bench at the overlook, and lay a short DG path on the inland side.</div>
+    <div class="cost"><b>Phase total: $6,000–13,000</b> &nbsp;·&nbsp; fill delivery + any permit are the contracted parts.</div>
+  </div>
+
+  <table class="cost" style="margin-top:6px">
+    <tr><th>Phase</th><th>What you get</th><th>Cost</th></tr>
+    <tr><td class="opt">Phase 0 · this fall</td><td>Weeds cleared, iceplant gone, meadow seeded</td><td class="diy">$1,500–4,000</td></tr>
+    <tr><td class="opt">Phase 1 · Year 1</td><td>Driveway narrowed &amp; surfaced; first flower yards planted</td><td class="diy">$4,000–9,000</td></tr>
+    <tr><td class="opt">Phase 2 · Year 2</td><td>Cliff-edge groundcover mats; wildflowers expanded</td><td class="diy">$2,000–4,000</td></tr>
+    <tr><td class="opt">Phase 3 · Year 3</td><td>Dry-creek swale, boulders, fire-wise cobble band</td><td class="diy">$3,000–7,000</td></tr>
+    <tr><td class="opt">Phase 4 · Year 4+</td><td>Sheltered sitting area, herb bank, overlook bench</td><td class="diy">$6,000–13,000</td></tr>
+    <tr class="tot"><td class="lbl">TOTAL over ~4–5 years</td><td>The whole property, done gradually</td><td class="diy">$16,500–37,000</td></tr>
+    <tr class="sub2"><td colspan="3">Versus roughly <b>$70,000–150,000+</b> if the same scope were fully contractor-installed in one go. Spreading it over years is what makes it affordable — and each phase stands on its own.</td></tr>
+  </table>
+
+  <div class="buy" style="margin-top:14px"><b>Woven through every year:</b> hand-water new plants through their first summer only, weed around them the first two summers while they establish, and mow the meadow once (late spring). After that it's essentially self-sustaining.</div>
+</section>
+
+<!-- ================= COST ESTIMATES ================= -->
+<section>
+  <h2>Rough cost estimates</h2>
+  <p class="carelegend">Ballpark 2026 ranges for the coastal Mendocino area, materials + labor. <b class="diy">DIY</b> = you buy materials in bulk and do the work (plant in fall from 1-gal/plugs, rent a compactor, etc.). <b class="pro">Contractor</b> = installed by a landscape crew at typical NorCal rates ($8–20/sq ft for native/drought planting, $2–8/sq ft for DG). Rural delivery, boulder-setting, and any bluff-setback permit add cost. These are planning numbers only — get local bids before budgeting.</p>
+  <table class="cost">
+    <tr><th>Element</th><th>Assumed scope</th><th>DIY</th><th>Contractor</th></tr>
+    <tr><td class="opt">Driveway surface<span class="sub">DG over Class II base</span></td><td><b>Narrowed drive + parking apron</b> (~1,200–1,800 sq ft), not the full spreading dirt area; keep concrete pad. Meadow reclaims the rest.</td><td class="diy">$1,800–3,200</td><td class="pro">$4,000–9,000</td></tr>
+    <tr><td class="opt">Plan 1 · Coastal Meadow</td><td>Seed + plugs over the open lot (~8–12k sq ft), annual mow</td><td class="diy">$1,500–4,000</td><td class="pro">$8,000–20,000</td></tr>
+    <tr><td class="opt">Plan 2 · Bluff Rock Garden</td><td>~2,500 sq ft DG + cobble + boulders + succulents</td><td class="diy">$6,000–12,000</td><td class="pro">$25,000–50,000</td></tr>
+    <tr><td class="opt">Plan 3 · Dry Creek</td><td>Short 30–60 ft cobble swale (uses your on-site cobble)</td><td class="diy">$1,500–3,500</td><td class="pro">$4,000–9,000</td></tr>
+    <tr><td class="opt">Plan 4 · Sheltered Garden Rooms</td><td>Fill berms + pea-gravel sitting area + shrubs</td><td class="diy">$3,000–6,000</td><td class="pro">$10,000–20,000<span class="sub">+ possible coastal permit</span></td></tr>
+    <tr><td class="opt">Plan 5 · Overlook Trail + Groundcover</td><td>DG path + ~2,500 sq ft evergreen mats + cobble band</td><td class="diy">$4,000–8,000</td><td class="pro">$18,000–35,000</td></tr>
+    <tr><td class="opt">Plan 6 · Mowed Native Lawn</td><td>~4–6k sq ft dune-sedge/bentgrass lawn (plugs or native sod), flower borders extra</td><td class="diy">$4,000–12,000</td><td class="pro">$18,000–40,000</td></tr>
+    <tr><td class="opt">Flower palette planting<span class="sub">(any of the 12, per yard)</span></td><td>~1,500–2,500 sq ft of perennials from 1-gal/plugs</td><td class="diy">$3,000–7,000</td><td class="pro">$15,000–40,000</td></tr>
+    <tr class="sub2"><td colspan="4">Note: the plans are <b>alternatives</b>, not a checklist — you wouldn't build all of them. A realistic combined build (driveway + meadow + flower beds + cliff-edge mats + dry creek) totals about <b>$12,000–25,000 DIY</b> / <b>$45,000–95,000 contracted</b>. See the phased plan for what that looks like year by year.</td></tr>
+  </table>
+  <div class="buy" style="margin-top:14px"><b>Where the money goes / how to save:</b> planting from small stock in fall (not big containers) and buying DG, cobble and drain rock in bulk are the biggest DIY savings. Hire out the parts that need equipment — driveway base compaction and setting large boulders. The <b>meadow + driveway</b> combo is the highest-impact, lowest-cost starting point; the rock garden and full groundcover carpets are the priciest. Anything involving grading or fill within the coastal bluff setback may need a Mendocino County permit (budget a few hundred to low thousands for that).</div>
+</section>
+
+<!-- ================= GLOSSARY ================= -->
+<section>
+  <h2>Plain-English glossary</h2>
+  <p class="carelegend">Every bit of jargon used in this document, decoded.</p>
+  <dl class="gloss">
+    <dt>DG (decomposed granite)</dt>
+    <dd>Granite that has naturally weathered and crumbled into a mix of coarse sand and small gravel — tan/gold, gritty. It's the classic surface for garden paths and park trails.</dd>
+
+    <dt>3/8"-minus</dt>
+    <dd>A gravel/DG spec meaning the particles range from 3/8 inch <i>down to fine dust</i>. Those fines are the point: when you spread it, wet it and compact it, the dust fills the gaps and the whole thing <b>locks into a firm surface</b>. Plain gravel without fines just scatters underfoot and under tires.</dd>
+
+    <dt>DG top coat</dt>
+    <dd>The final 1–2" wearing layer of DG spread over the compacted base rock, then dampened and rolled firm. The base gives strength; the DG gives you the finished drivable/walkable surface.</dd>
+
+    <dt>Stabilized DG</dt>
+    <dd>DG pre-mixed with a binder so it sets harder and resists washing out. Costs more — worth it on your windy, rainy site.</dd>
+
+    <dt>Class II road base (aggregate base)</dt>
+    <dd>The engineered crushed-rock layer that goes <i>under</i> a driveway surface. It's what carries the weight of cars and stops ruts. Typically 3–4" deep, compacted, then topped with DG.</dd>
+
+    <dt>Plate compactor</dt>
+    <dd>A rentable machine (like a vibrating steel plate you walk behind) that packs loose rock down solid. Rent one for a day to finish the driveway and paths.</dd>
+
+    <dt>Plugs</dt>
+    <dd>Very small young plants (a couple inches across) sold in trays — the cheap way to plant grasses and groundcovers over a big area. They establish faster than big plants and cost a fraction.</dd>
+
+    <dt>1-gallon (1-gal)</dt>
+    <dd>A standard nursery pot size. For a windy bluff, small plants (plugs or 1-gal) actually <b>outperform</b> big showy containers — they root in and anchor better.</dd>
+
+    <dt>Sod cutter</dt>
+    <dd>A rentable machine that slices off the top 1–2" of turf and roots in strips, like peeling a carpet. The fastest way to clear grass before planting.</dd>
+
+    <dt>Weed seed bank</dt>
+    <dd>The reservoir of dormant weed seeds already sitting in your soil. Pulling the tops doesn't touch it — this is why weeds come right back, and why clearing has to target the seeds.</dd>
+
+    <dt>"Grow-and-kill" cycle</dt>
+    <dd>Deliberately watering bare ground to make the weed seeds sprout, then killing the seedlings (hoe or flame). Repeat 2–3 times to drain the seed bank <i>before</i> you sow your natives, so they aren't swamped.</dd>
+
+    <dt>Sheet mulching</dt>
+    <dd>Smothering grass by laying cardboard over it and covering with several inches of mulch or gravel. Takes a couple of months, no digging, no chemicals.</dd>
+
+    <dt>Gopher basket</dt>
+    <dd>A wire cage you plant into, so gophers can't eat the roots. Cheap insurance — losing established plants to gophers is the most common way these gardens fail.</dd>
+
+    <dt>Groundcover / mat</dt>
+    <dd>A low, spreading plant that knits together into a continuous carpet. On a bluff they double as <b>erosion control</b> — the roots hold the soil.</dd>
+
+    <dt>Drift</dt>
+    <dd>A loose, natural-looking sweep of one plant repeated — rather than dotting single plants around. Drifts are what make a planting read as a landscape instead of a collection.</dd>
+
+    <dt>Fire-wise band</dt>
+    <dd>A strip of non-flammable material (here, cobble/gravel) laid right around the base of the house so nothing burnable touches the walls.</dd>
+
+    <dt>Berm</dt>
+    <dd>A low mound of imported soil, shaped to deflect wind up and over the plants sheltering behind it.</dd>
+
+    <dt>Swale</dt>
+    <dd>A shallow drainage channel. Lined with cobble, it becomes an attractive "dry creek" that carries winter runoff without eroding.</dd>
+
+    <dt>Cobble</dt>
+    <dd>Rounded stones roughly 3–8" across (river- or beach-worn). Used for dry creeks and mulch bands. <b>You already have a pile on site.</b></dd>
+
+    <dt>Drain rock</dt>
+    <dd>Clean crushed rock (~3/4") with no fines, used <i>under</i> cobble in a creek bed so water moves through freely.</dd>
+
+    <dt>Coastal bluff setback</dt>
+    <dd>A protected zone near the cliff edge where grading, fill, or structures may require a Mendocino County coastal permit. Planting is generally fine; moving earth is what triggers review.</dd>
+
+    <dt>Establishment period</dt>
+    <dd>The first year or two after planting, when new plants still need occasional water and weeding. After that these species are on their own — no irrigation.</dd>
+  </dl>
+</section>
+
+<p class="foot">
+Suppliers: <a href="https://stores.truevalue.com/ca/gualala/17786/">Gualala Building Supply</a> (38501 S Hwy 1) &middot; <a href="https://www.yelp.com/biz/gualala-nursery-and-trading-company-gualala">Gualala Nursery &amp; Trading Co</a> (38860 S Hwy 1) &middot; <a href="https://mygravelmonkey.com/locations/california/gualala/">Gravel Monkey</a> &middot; <a href="https://hellogravel.com/locations/california/point-arena-95468/">Hello Gravel</a> &middot; <a href="https://www.mostlynatives.com/">Mostly Natives Nursery</a>, Tomales.<br>
+Before/after images are AI edits of your actual walkthrough-video frames (ChatGPT, July 2026), stored in the <code>renders/</code> folder next to this file — keep them together when moving or sharing.<br>
+All plants shown are wind- and salt-tolerant, deer-resistant, and need no irrigation once established. Plant from 1-gal/plugs in fall, use gopher baskets, and hand-water only through the first summer.<br>
+Permit info summarized from <a href="https://www.mendocinocounty.gov/departments/planning-building-services/coastal-zone-information">Mendocino County Coastal Zone Information</a>, <a href="https://www.mendocinocounty.gov/Home/Components/ServiceDirectory/ServiceDirectory/371/2">Coastal Development Permits</a>, and <a href="https://www.mendocinocounty.gov/departments/planning-building-services/planning-division/categorical-exclusions">Categorical Exclusions</a> — confirm your specific project with County Planning &amp; Building Services before moving earth.
+</p>
+</div>
+
+<script>
+/* ====== ACCURATE BASE PLAN ======
+   Traced from satellite imagery + the walk-around video.
+   Scale: 1 px = 0.4 ft  (50 ft = 125 px).  North = up.       */
+const DEFS = `<defs>
+<pattern id="rock" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+  <rect width="7" height="7" fill="#c3bcae"/><line x1="0" y1="0" x2="0" y2="7" stroke="#a49d90" stroke-width="1.1"/></pattern>
+<pattern id="grass" width="10" height="10" patternUnits="userSpaceOnUse">
+  <rect width="10" height="10" fill="#cfdcae"/><circle cx="2" cy="3" r="0.7" fill="#b9caa0"/><circle cx="7" cy="8" r="0.7" fill="#b9caa0"/></pattern>
+<pattern id="dg" width="6" height="6" patternUnits="userSpaceOnUse">
+  <rect width="6" height="6" fill="#dcc9a2"/><circle cx="1.5" cy="2" r="0.6" fill="#c9b48c"/><circle cx="4.5" cy="4.5" r="0.6" fill="#c9b48c"/></pattern>
+<pattern id="cob" width="9" height="9" patternUnits="userSpaceOnUse">
+  <rect width="9" height="9" fill="#c2b9ab"/><ellipse cx="3" cy="3" rx="2.4" ry="1.8" fill="#a8a095"/><ellipse cx="7" cy="7" rx="2" ry="1.5" fill="#b3aa9e"/></pattern>
+<g id="cyp"><ellipse cx="0" cy="0" rx="17" ry="14" fill="#4f6c42" opacity="0.95"/><ellipse cx="-5" cy="-4" rx="9" ry="7" fill="#5f7d4f"/><ellipse cx="6" cy="3" rx="7" ry="5" fill="#456038"/></g>
+<g id="cyps"><ellipse cx="0" cy="0" rx="11" ry="9" fill="#557048"/><ellipse cx="-3" cy="-3" rx="6" ry="4" fill="#6a8757"/></g>
+<g id="bldr"><ellipse cx="0" cy="0" rx="9" ry="7" fill="#aaa398" stroke="#7d766b" stroke-width="1.1"/><path d="M-4,-3 Q0,0 -1,4" stroke="#8f887d" stroke-width="0.9" fill="none"/></g>
+<g id="stake"><circle r="3.4" fill="#e07a2f" stroke="#fff" stroke-width="1.2"/></g>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#5a5348"/></marker>
+<marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#7a8ca3"/></marker>
+</defs>`;
+
+/* bluff-top (cliff edge) line, N->S down the west side, with the cove notch */
+const BLUFF = "M262,66 L272,104 L296,132 L308,158 L288,186 L266,212 L272,246 L258,286 L238,330 L220,382 L208,438 L204,498";
+
+const GROUND = `
+<rect x="0" y="0" width="780" height="640" fill="#eef0e4"/>
+
+<!-- ocean -->
+<path d="M0,0 L262,66 ${BLUFF.slice(1)} L204,498 L120,640 L0,640 Z" fill="#7fb2c8"/>
+<path d="M0,60 Q70,74 130,66 M0,130 Q80,146 150,134 M0,210 Q70,226 120,214 M0,300 Q60,316 110,306 M0,390 Q60,404 100,396 M0,480 Q50,494 90,486 M0,560 Q50,574 90,566"
+      stroke="#a5cddc" stroke-width="2.5" fill="none" opacity="0.75"/>
+<circle cx="120" cy="150" r="9" fill="#8d867b"/><circle cx="86" cy="255" r="6" fill="#8d867b"/>
+<circle cx="140" cy="352" r="7" fill="#8d867b"/><circle cx="96" cy="440" r="10" fill="#8d867b"/>
+<text x="40" y="356" font-size="14" fill="#2e6480" font-style="italic" font-weight="600">Pacific Ocean</text>
+
+<!-- eroding rocky bluff face just below the cliff top -->
+<path d="M262,66 L272,104 L296,132 L308,158 L288,186 L266,212 L272,246 L258,286 L238,330 L220,382 L208,438 L204,498
+         L170,486 L176,430 L188,376 L206,322 L224,278 L238,244 L232,208 L252,178 L268,152 L246,116 L236,74 Z"
+      fill="url(#rock)" stroke="#9c9488" stroke-width="1"/>
+
+<!-- cove notch (water cutting in from the NW) -->
+<path d="M308,158 L288,186 L262,176 L246,150 L262,124 L292,132 Z" fill="#7fb2c8"/>
+<text x="243" y="120" font-size="10" fill="#2e6480" font-style="italic">cove</text>
+
+<!-- cliff edge line -->
+<path d="${BLUFF}" fill="none" stroke="#6b6357" stroke-width="2.6" stroke-dasharray="9 5"/>
+<text x="196" y="556" font-size="10.5" fill="#6b6357" font-style="italic" font-weight="600">cliff edge (bluff top)</text>
+
+<!-- meadow / open ground inside the lot -->
+<path d="M262,66 L642,126 L598,556 L206,502 L204,498 L208,438 L220,382 L238,330 L258,286 L272,246 L266,212 L288,186 L308,158 L296,132 L272,104 Z"
+      fill="url(#grass)"/>
+
+<!-- Highway 1 -->
+<polygon points="658,44 700,36 780,296 740,308" fill="#c8c1b4"/>
+<path d="M672,44 L762,300" stroke="#fff" stroke-width="1.6" stroke-dasharray="11 9"/>
+<text x="700" y="180" font-size="11.5" fill="#5a5348" font-weight="600" transform="rotate(71 700 180)">Highway 1</text>
+
+<!-- property boundary (tree lines + survey stakes) -->
+<path d="M262,66 L642,126 L598,556 L206,502" fill="none" stroke="#c4674a" stroke-width="2" stroke-dasharray="12 4 3 4" opacity="0.95"/>
+<use href="#stake" x="262" y="66"/><use href="#stake" x="642" y="126"/><use href="#stake" x="598" y="556"/><use href="#stake" x="206" y="502"/>
+<text x="470" y="86" font-size="10" fill="#a8542f" font-weight="600">property line — marked by stakes &amp; tree line</text>
+
+`;
+
+const BUILT = `
+<!-- cypress windbreak along Highway 1 / east boundary -->
+<use href="#cyp" x="612" y="168"/><use href="#cyp" x="628" y="214"/><use href="#cyp" x="622" y="262"/>
+<use href="#cyp" x="606" y="306"/><use href="#cyp" x="596" y="352"/>
+<use href="#cyps" x="576" y="140"/><use href="#cyps" x="548" y="118"/>
+<text x="556" y="196" font-size="10" fill="#3f5a36" font-style="italic" font-weight="600">existing cypress windbreak</text>
+
+<!-- dense trees / tree line SE + S (property edge) -->
+<use href="#cyp" x="582" y="400"/><use href="#cyp" x="590" y="452"/><use href="#cyp" x="566" y="498"/>
+<use href="#cyp" x="516" y="524"/><use href="#cyp" x="462" y="530"/><use href="#cyp" x="410" y="520"/>
+<use href="#cyps" x="356" y="504"/><use href="#cyps" x="300" y="486"/><use href="#cyps" x="252" y="470"/>
+<text x="330" y="560" font-size="10" fill="#3f5a36" font-style="italic" font-weight="600">tree line = south boundary</text>
+
+<!-- wind-sculpted cypress on the ocean side -->
+<use href="#cyps" x="318" y="228"/><use href="#cyps" x="296" y="352"/>
+
+<!-- driveway from Highway 1 to the carport -->
+<path d="M690,118 C640,146 600,176 574,220" stroke="#d3bf98" stroke-width="27" fill="none" stroke-linecap="round"/>
+<ellipse cx="556" cy="238" rx="42" ry="30" fill="#d3bf98"/>
+<text x="614" y="112" font-size="10.5" fill="#7a6a4a" font-weight="600">driveway</text>
+
+<!-- HOUSE -->
+<polygon points="382,222 492,238 478,332 368,316" fill="#9a9aa2" stroke="#5f5f68" stroke-width="1.6"/>
+<polygon points="492,238 578,252 566,344 478,332" fill="#8b8b95" stroke="#5f5f68" stroke-width="1.6"/>
+<path d="M382,222 L430,276 L492,238 M368,316 L430,276 L478,332" stroke="#6d6d76" stroke-width="0.9" fill="none" opacity="0.8"/>
+<path d="M492,238 L528,292 L578,252 M478,332 L528,292 L566,344" stroke="#6d6d76" stroke-width="0.9" fill="none" opacity="0.8"/>
+<polygon points="334,246 382,252 376,316 328,310" fill="#e6e1d4" stroke="#a9a394" stroke-width="1.2"/>
+<text x="332" y="286" font-size="9.5" fill="#6b6357" font-weight="600">patio</text>
+<rect x="560" y="276" width="20" height="34" fill="#6f6f78"/>
+<text x="586" y="300" font-size="9.5" fill="#5f5f68" font-weight="600">carport</text>
+<text x="404" y="278" font-size="12" fill="#3f3f47" font-weight="700">HOUSE</text>
+<polygon points="336,196 372,201 368,224 332,219" fill="#8f8578" stroke="#6b6357" stroke-width="1.1"/>
+<text x="330" y="190" font-size="9.5" fill="#6b6357" font-weight="600">shed</text>
+
+<!-- 20-25 ft dimension: patio to cliff edge -->
+<path d="M326,288 L262,286" stroke="#c4674a" stroke-width="1.6" marker-start="url(#ar)" marker-end="url(#ar)"/>
+<text x="238" y="304" font-size="10.5" font-weight="700" fill="#c4674a">~20–25 ft only</text>
+
+<!-- existing cobble pile on site -->
+<ellipse cx="540" cy="424" rx="16" ry="11" fill="url(#cob)" stroke="#8f887d" stroke-width="1"/>
+<text x="520" y="450" font-size="9.5" fill="#6b6357" font-style="italic">cobble pile (already on site)</text>
+
+<!-- prevailing wind -->
+<path d="M108,44 Q170,26 232,44" fill="none" stroke="#7a8ca3" stroke-width="2.4" marker-end="url(#arw)"/>
+<text x="112" y="30" font-size="10.5" fill="#7a8ca3" font-style="italic" font-weight="600">prevailing NW wind</text>
+
+<!-- north arrow -->
+<g transform="translate(726,586)">
+  <circle r="24" fill="#fff" opacity="0.85" stroke="#c9c2b2"/>
+  <path d="M0,-17 L7,10 L0,4 L-7,10 Z" fill="#3f3f47"/>
+  <text y="-20" font-size="10" font-weight="700" text-anchor="middle" fill="#3f3f47">N</text>
+</g>
+
+<!-- scale bar : 125 px = 50 ft -->
+<g transform="translate(32,596)">
+  <rect x="0" y="0" width="62.5" height="7" fill="#3f3f47"/><rect x="62.5" y="0" width="62.5" height="7" fill="#fff" stroke="#3f3f47"/>
+  <text x="0" y="-5" font-size="9.5" fill="#3f3f47" font-weight="600">0</text>
+  <text x="118" y="-5" font-size="9.5" fill="#3f3f47" font-weight="600">50 ft</text>
+</g>`;
+
+function lbl(x,y,t,anchor){return `<text x="${x}" y="${y}" font-size="10.5" font-weight="700" fill="#2f2f36" text-anchor="${anchor||'start'}" paint-order="stroke" stroke="#eef0e4" stroke-width="3.4">${t}</text>`;}
+const dots=(pts,c,r)=>pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="${r||3}" fill="${c}"/>`).join('');
+const bld =(pts,s)=>pts.map(p=>`<use href="#bldr" x="${p[0]}" y="${p[1]}" transform="scale(${s||1})" />`).join('');
+/* keyed legend box, bottom-centre — keeps the drawing itself uncluttered */
+function legend(title, items){
+  const x=286, y=560, w=414, h=26+items.length*15;
+  return `<g><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="#fdfbf4" stroke="#c9c2b2"/>
+  <text x="${x+11}" y="${y+17}" font-size="11" font-weight="700" fill="#2f2f36">${title}</text>
+  ${items.map((it,i)=>`<rect x="${x+12}" y="${y+26+i*15}" width="11" height="8" rx="2" fill="${it[0]}" stroke="#8f887d" stroke-width="0.6"/>
+    <text x="${x+30}" y="${y+34+i*15}" font-size="10" fill="#3f3f47">${it[1]}</text>`).join('')}</g>`;
+}
+
+const OVERLAYS = {
+/* 1 — COASTAL MEADOW */
+p1: `
+<path d="M262,66 L642,126 L598,556 L206,502 L208,438 L220,382 L238,330 L258,286 L272,246 L266,212 L288,186 L308,158 L296,132 L272,104 Z" fill="#bcd193" opacity="0.6"/>
+<path d="M372,320 C336,350 306,362 276,376" stroke="#e6edd6" stroke-width="15" fill="none" stroke-linecap="round"/>
+<path d="M420,336 C404,404 362,456 300,472" stroke="#e6edd6" stroke-width="15" fill="none" stroke-linecap="round"/>
+<path d="M470,346 C500,404 512,452 528,486" stroke="#e6edd6" stroke-width="15" fill="none" stroke-linecap="round"/>
+${dots([[300,240],[340,362],[280,412],[382,424],[440,444],[330,300],[252,332],[470,404],[520,362],[360,472],[430,492],[302,200],[352,162],[422,172],[482,182],[540,322],[556,404]],'#e8a33d')}
+${dots([[322,342],[272,372],[402,382],[462,472],[352,232],[500,302],[542,462],[292,302]],'#c4674a')}
+${dots([[352,402],[422,302],[302,452],[502,422],[382,202],[556,362]],'#8a9cc4')}
+<circle cx="272" cy="378" r="11" fill="#d3bf98" stroke="#a9a394"/>
+${lbl(292,382,'bluff overlook')}
+${legend('PLAN 1 · Coastal Meadow',[['#bcd193','Native meadow — Molate fescue + dune sedge, wildflowers oversown'],['#e6edd6','Mown paths (the only maintenance: 1–2 mows a year)'],['#d3bf98','Bluff overlook']])}
+`,
+/* 2 — BLUFF ROCK GARDEN */
+p2: `
+<path d="M330,236 L386,244 L380,330 L330,338 L288,320 L268,280 L276,240 Z" fill="url(#dg)" stroke="#c1ad86" stroke-width="1.2"/>
+<path d="M386,344 L470,352 L462,404 L380,398 Z" fill="url(#dg)" stroke="#c1ad86" stroke-width="1.2"/>
+<path d="M300,352 C270,376 250,404 240,438 L282,452 C292,414 312,388 336,368 Z" fill="url(#cob)" stroke="#9c9488" stroke-width="1"/>
+<g transform="translate(300,268)">${bld([[0,0]],1.5)}${bld([[26,14]],1)}${bld([[-16,20]],0.8)}</g>
+<g transform="translate(340,330)">${bld([[0,0]],1.2)}${bld([[22,-10]],0.8)}</g>
+<g transform="translate(420,372)">${bld([[0,0]],1.1)}${bld([[24,10]],0.75)}</g>
+${dots([[318,246],[330,254],[306,258]],'#b7c4bd',3.4)}
+${dots([[352,300],[364,310],[344,312]],'#d77fa8',3.2)}
+${dots([[290,300],[300,312],[278,308]],'#e8c94d',3.2)}
+${dots([[430,362],[444,370],[420,374]],'#a9a0d4',3.2)}
+${legend('PLAN 2 · Bluff Rock Garden',[['#dcc9a2','Decomposed-granite ground plane'],['#c2b9ab','Beach-cobble drift'],['#aaa398','Boulder groups (set 1/3 buried)'],['#d77fa8','Succulent + cushion pockets — Dudleya, thrift, daisy']])}
+`,
+/* 3 — DRY CREEK (true-to-scale: a short swale, not a canyon) */
+p3: `
+<path d="M452,206 C412,196 372,186 340,172 L330,190 C364,204 404,214 446,224 Z" fill="url(#cob)" stroke="#9c9488" stroke-width="1.1"/>
+<path d="M330,190 L308,182 L300,166 L340,172 Z" fill="#7fb2c8" opacity="0.55"/>
+${bld([[386,192]],1.3)}${bld([[430,208]],1)}${bld([[344,180]],0.9)}
+<rect x="398" y="182" width="9" height="30" rx="2" fill="#8a6f4d" transform="rotate(14 402 197)"/>
+${dots([[368,214],[404,222],[430,232],[350,200]],'#5f7d4f',3.4)}
+${dots([[380,178],[420,192]],'#7a5fa8',3.2)}
+<path d="M300,166 L286,158" stroke="#5c93ac" stroke-width="2.4" marker-end="url(#arw)"/>
+${lbl(468,196,'~45 ft')}
+${legend('PLAN 3 · Dry Creek',[['#c2b9ab','Short cobble swale (~45 ft) on the existing runoff line — drains to the cove'],['#aaa398','Boulders at the bends + a timber crossing'],['#5f7d4f','Banks: gray rush, Douglas iris, monkeyflower'],['#eef0e4','Rest of the lot stays simple mown meadow']])}
+`,
+/* 4 — SHELTERED GARDEN ROOMS (inland only — never on the bluff strip) */
+p4: `
+<path d="M398,368 C440,346 496,348 534,374 C522,394 500,398 476,392 C444,384 418,384 398,398 Z" fill="#c19a6b" opacity="0.6" stroke="#9a7550"/>
+<path d="M364,430 C402,410 452,414 486,436 C472,456 442,458 414,450 C392,444 376,444 362,456 Z" fill="#c19a6b" opacity="0.6" stroke="#9a7550"/>
+<use href="#cyps" x="424" y="366"/><use href="#cyps" x="466" y="364"/><use href="#cyps" x="502" y="376"/>
+<use href="#cyps" x="392" y="430"/><use href="#cyps" x="434" y="428"/><use href="#cyps" x="470" y="440"/>
+<circle cx="470" cy="410" r="30" fill="url(#dg)" stroke="#c1ad86" stroke-width="1.2"/>
+${bld([[448,398]],0.85)}${bld([[492,400]],0.8)}${bld([[470,432]],0.8)}
+<circle cx="470" cy="410" r="7" fill="#9c9488" stroke="#6b6357"/>
+<ellipse cx="336" cy="400" rx="26" ry="19" fill="#b5cc8e" stroke="#93a86b"/>
+${lbl(336,404,'lawn','middle')}
+<path d="M300,344 Q346,358 392,370" fill="none" stroke="#7a8ca3" stroke-width="1.8" marker-end="url(#arw)"/>
+${lbl(246,338,'wind')}
+${legend('PLAN 4 · Sheltered Garden Rooms',[['#c19a6b','Low earth berms (18–36") planted with ceanothus / manzanita — block the wind'],['#dcc9a2','Gravel sitting circle with boulder seats + fire ring'],['#b5cc8e','Small lawn circle'],['#c4674a','All of it sits INLAND — never on the 20-ft bluff strip']])}
+`,
+/* 5 — OVERLOOK TRAIL + GROUNDCOVER CARPET */
+p5: `
+<path d="M330,238 L384,246 L378,330 L332,340 L292,318 L270,278 L278,240 Z" fill="#8fae6b" opacity="0.9"/>
+<path d="M300,350 C276,382 258,420 246,462 L294,474 C306,432 322,398 344,370 Z" fill="#9db877" opacity="0.9"/>
+<path d="M394,344 C374,394 386,446 434,468 C486,490 534,462 542,414 C548,378 528,352 496,344"
+      stroke="#d3bf98" stroke-width="15" fill="none" stroke-linecap="round"/>
+<circle cx="278" cy="374" r="12" fill="#d3bf98"/><rect x="268" y="369" width="20" height="6" rx="2" fill="#8a6f4d"/>
+<path d="M328,232 L390,240 L384,336 L330,346 Z" fill="none" stroke="#a8a095" stroke-width="6" stroke-dasharray="4 3"/>
+${dots([[300,262],[320,300],[286,296],[340,272],[310,330]],'#6a86c4',3.2)}
+${dots([[272,400],[290,436],[262,444]],'#d77fa8',3.2)}
+${dots([[430,460],[480,470],[520,436]],'#a9a0d4',3.2)}
+${lbl(298,368,'bench')}
+${legend('PLAN 5 · Overlook Trail + Groundcover',[['#8fae6b','Evergreen groundcover mats — hold the bluff, no mowing, no pruning'],['#d3bf98','DG loop trail (inland) + bench at the bluff overlook'],['#a8a095','Cobble fire-wise band around the house'],['#a9a0d4','Deer-grass + flower accents along the trail']])}
+`,
+/* 6 — MOWED NATIVE LAWN (lawn stretches inland; flowers on the edges; bluff strip stays mats) */
+p6: `
+<path d="M312,338 L558,366 L540,502 L262,458 L282,392 Z" fill="#a9cf7f" opacity="0.9"/>
+<path d="M330,140 L600,178 L594,202 L326,166 Z" fill="#a9cf7f" opacity="0.9"/>
+<path d="M300,350 C276,382 258,420 246,462 L294,474 C306,432 322,398 344,370 Z" fill="#8fae6b" opacity="0.9"/>
+<path d="M262,462 L538,506" stroke="#e8a33d" stroke-width="9" fill="none" stroke-linecap="round" opacity="0.85"/>
+<path d="M318,344 L554,370" stroke="#e8a33d" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.85"/>
+<path d="M602,208 L588,352" stroke="#e8a33d" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.85"/>
+${dots([[300,470],[360,480],[420,490],[480,498],[330,352],[400,360],[470,366],[530,372],[598,240],[594,290],[590,330]],'#c4674a',3.2)}
+${dots([[330,474],[390,484],[450,494],[510,502],[360,356],[430,362],[500,370],[600,264],[592,312]],'#8a9cc4',3.2)}
+${dots([[270,462],[315,472],[375,482],[435,492],[495,500],[345,354],[415,361],[485,368],[599,252],[591,300],[587,344]],'#d77fa8',2.8)}
+${lbl(408,420,'mowed native lawn','middle')}
+${lbl(462,158,'front lawn strip','middle')}
+${lbl(210,336,'bluff mats — no mow')}
+${lbl(408,458,'flowering border','middle')}
+${legend('PLAN 6 · Mowed Native Lawn',[['#a9cf7f','Lawn — dune sedge or native bentgrass, mowed every 2 weeks at 3&quot;'],['#e8a33d','Flowering borders along every edge — daisy, thrift, yarrow, poppy, coyote mint'],['#8fae6b','Bluff strip stays unmowed native mats (never mow the cliff edge)']])}
+`
+};
+
+// ---------- PLANT GUIDE ----------
+const W='plants/';
+const PLANTS=[
+ // [group, common, botanical, photo, description, care]
+ [1,"Seaside daisy","Erigeron glaucus","erigeron-glaucus.jpg","Lavender daisies almost year-round on the coast. The workhorse.","Very low"],
+ [1,"California poppy","Eschscholzia californica","eschscholzia-californica.jpg","Orange, from seed, self-sows happily.","Very low"],
+ [1,"Yarrow","Achillea millefolium","achillea-millefolium.jpg","Flat white flower heads, ferny leaves. Deer ignore it.","Very low"],
+ [1,"Sea thrift","Armeria maritima","armeria-maritima.jpg","Tight grassy cushions topped with pink pom-poms.","Low"],
+ [1,"California fuchsia","Epilobium canum","epilobium-canum.jpg","Scarlet-orange tubes in late summer. Hummingbird magnet.","Low"],
+ [1,"Sticky monkeyflower","Diplacus aurantiacus","diplacus-aurantiacus.jpg","Apricot-orange trumpets, blooms for months.","Low"],
+ [1,"Coast aster","Symphyotrichum chilense","symphyotrichum-chilense.jpg","Lavender daisies in late summer/fall, when little else blooms.","Low"],
+ [1,"Coyote mint","Monardella villosa","monardella-villosa.jpg","Purple pom-poms, minty scent when brushed. Bees love it.","Low"],
+ [1,"Douglas iris","Iris douglasiana","iris-douglasiana.jpg","Purple iris that grows wild on your stretch of coast.","Low"],
+ [1,"Coast buckwheat","Eriogonum latifolium","eriogonum-latifolium.jpg","Cream pom-poms that age to rust. Great for pollinators.","Very low"],
+ [1,"Woolly sunflower","Eriophyllum staechadifolium","eriophyllum-staechadifolium.jpg","Bright yellow clusters over grey-green foliage. Very salt-tough.","Very low"],
+ [1,"Gumplant","Grindelia stricta","grindelia-stricta.jpg","Yellow daisies right on the bluff edge. Tough as nails.","Very low"],
+ [1,"Blue-eyed grass","Sisyrinchium bellum","sisyrinchium-bellum.jpg","Small blue-purple flowers in spring; looks like a little iris.","Very low"],
+ [1,"Island coral bells","Heuchera maxima","heuchera-maxima.jpg","Airy white flower spikes; for the shadier tree-line edge.","Low"],
+ [1,"Prostrate rosemary","Salvia rosmarinus","salvia-rosmarinus.jpg","Blue winter flowers, edible, loves salt wind. (Not native, but thrives.)","Low"],
+ [1,"California sagebrush","Artemisia californica","artemisia-californica.jpg","Soft, feathery grey-green mounds. Wonderful smell.","Low"],
+
+ [2,"Beach strawberry","Fragaria chiloensis","fragaria-chiloensis.jpg","Glossy dark leaves, white flowers. Fast-spreading carpet.","Very low"],
+ [2,"Pt. Reyes ceanothus","Ceanothus gloriosus","ceanothus-gloriosus.jpg","Evergreen mat smothered in blue flowers each spring.","Very low"],
+ [2,"Kinnikinnick","Arctostaphylos uva-ursi","arctostaphylos-uva-ursi.jpg","Low manzanita: glossy leaves, pink bells, red berries.","Very low"],
+ [2,"Dwarf coyote brush","Baccharis pilularis","baccharis-pilularis.jpg","Bright green bulletproof mound. The toughest thing here.","Very low"],
+ [2,"Yerba buena","Clinopodium douglasii","clinopodium-douglasii.jpg","Trailing, fragrant, makes a nice tea. Likes part shade.","Very low"],
+
+ [3,"Bluff lettuce (Dudleya)","Dudleya farinosa","dudleya-farinosa.jpg","Powdery blue-grey rosettes — already grows wild on your cliffs.","Very low"],
+ [3,"Pacific stonecrop","Sedum spathulifolium","sedum-spathulifolium.jpg","Silvery succulent mat with yellow flowers. Needs sharp drainage.","Very low"],
+
+ [4,"Red fescue 'Molate'","Festuca rubra","festuca-rubra.jpg","The meadow base. Soft blue-green, sown from seed, mow once a year.","Very low"],
+ [4,"Dune sedge","Carex pansa","carex-pansa.jpg","Green, walkable, lawn-like without being a lawn. From plugs.","Very low"],
+ [4,"Idaho fescue","Festuca idahoensis","festuca-idahoensis.jpg","Fine blue-grey tufts. A tidier, bluer meadow base.","Very low"],
+ [4,"Deer grass","Muhlenbergia rigens","muhlenbergia-rigens.jpg","Big fountain-shaped tussock. Great beside a path.","Very low"],
+ [4,"Pacific reed grass","Calamagrostis nutkaensis","calamagrostis-nutkaensis.jpg","Lush arching clumps; best in the lee of the house.","Very low"],
+ [4,"California fescue","Festuca californica","festuca-californica.jpg","Larger blue-green bunchgrass, handles part shade.","Very low"],
+ [4,"California gray rush","Juncus patens","juncus-patens.jpg","Stiff blue-grey spikes. Lines the dry creek beautifully.","Very low"],
+
+ [5,"Toyon","Heteromeles arbutifolia","heteromeles-arbutifolia.jpg","Evergreen screen with red winter berries. Birds love it.","Low"],
+ [5,"Coast silk tassel","Garrya elliptica","garrya-elliptica.jpg","Evergreen with dangling winter catkins. Good windbreak infill.","Low"],
+ [5,"Coffeeberry","Frangula californica","frangula-californica.jpg","Compact evergreen, berries for birds. 'Eve Case' stays tidy.","Low"],
+ [5,"Pacific wax myrtle","Morella californica","morella-californica.jpg","Fast, dense evergreen screen. Excellent in salt wind.","Low"],
+ [5,"Coast huckleberry","Vaccinium ovatum","vaccinium-ovatum.jpg","Glossy evergreen with edible berries. Likes the shady side.","Low"]
+];
+PLANTS.forEach(p=>{
+  const el=document.getElementById('pg'+p[0]);
+  if(!el) return;
+  const care=p[5]==='Very low'?'Very low care':'Low care';
+  el.insertAdjacentHTML('beforeend',
+   `<div class="pg"><img loading="lazy" src="${W}${p[3]}" alt="${p[1]}">
+    <div class="t"><div class="cn">${p[1]}</div><div class="bn">${p[2]}</div>
+    <div class="d">${p[4]}</div><span class="r">${care}</span></div></div>`);
+});
+
+document.querySelectorAll('.plan-svg').forEach(el=>{
+  el.innerHTML = `<svg viewBox="0 0 780 666" role="img" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif,system-ui,sans-serif">${DEFS}${GROUND}${OVERLAYS[el.dataset.plan]}${BUILT}</svg>`;
+});
+document.querySelectorAll('.copybtn').forEach(b=>{
+  b.addEventListener('click',()=>{
+    navigator.clipboard.writeText(b.previousElementSibling.textContent.trim());
+    b.textContent='Copied!';setTimeout(()=>b.textContent='Copy prompt',1500);
+  });
+});
+
+// ---------- LIGHTBOX ----------
+const lb=document.createElement('div');lb.id='lb';
+lb.innerHTML='<figure><img alt=""><figcaption></figcaption></figure>';
+document.body.appendChild(lb);
+const lbImg=lb.querySelector('img'),lbCap=lb.querySelector('figcaption');
+function openLb(img){
+  lbImg.src=img.getAttribute('src');lbImg.alt=img.alt||'';
+  let cap=img.alt||'';
+  const fig=img.closest('figure');
+  if(fig){const fc=fig.querySelector('figcaption');if(fc)cap=fc.innerText;}
+  const pg=img.closest('.pg');
+  if(pg){const cn=pg.querySelector('.cn'),bn=pg.querySelector('.bn'),d=pg.querySelector('.d');
+    cap=(cn?cn.textContent:'')+(bn?' — '+bn.textContent:'')+(d?'\n'+d.textContent:'');}
+  const r=img.closest('.render');
+  if(r&&!fig){const c=img.nextElementSibling;if(c&&c.classList.contains('cap'))cap=c.innerText;}
+  lbCap.textContent=cap;
+  lb.classList.add('open');document.body.style.overflow='hidden';
+}
+function closeLb(){lb.classList.remove('open');document.body.style.overflow='';lbImg.removeAttribute('src');}
+document.addEventListener('click',e=>{
+  if(lb.classList.contains('open')){closeLb();return;}
+  const img=e.target.closest('figure img,.pg img,.render img');
+  if(img)openLb(img);
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&lb.classList.contains('open'))closeLb();});
+</script>
+</body>
+</html>

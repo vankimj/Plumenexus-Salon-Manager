@@ -94,6 +94,13 @@
             { "key": "X-Robots-Tag",                   "value": "noindex, nofollow, noarchive, nosnippet" },
             { "key": "Cross-Origin-Opener-Policy",     "value": "same-origin-allow-popups" }
           ]
+        },
+        {
+          "//": "Unlisted /gualala-* page (static, not in nav/sitemap) renders via one inline <script>; allow exactly that script by hash — scoped here so the site-wide CSP stays strict. Last matching rule wins, other headers still merge in from the ** block above.",
+          "source": "/gualala-d184c80b**",
+          "headers": [
+            { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'sha256-2+XeCgldwnZ/WoIMbcUBZUb5NTlJVMOc8X7k7SYbf/E='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; upgrade-insecure-requests" }
+          ]
         }
       ]
     },
